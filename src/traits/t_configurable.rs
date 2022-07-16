@@ -10,54 +10,6 @@ pub enum PropertiesError {
     InvalidValue,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Flavour {
-    Vanilla,
-    Fabric,
-    Paper,
-    Spigot,
-}
-
-impl<'de> Deserialize<'de> for Flavour {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        match s.to_lowercase().as_str() {
-            "vanilla" => Ok(Flavour::Vanilla),
-            "fabric" => Ok(Flavour::Fabric),
-            "paper" => Ok(Flavour::Paper),
-            "spigot" => Ok(Flavour::Spigot),
-            _ => Err(serde::de::Error::custom(format!("Unknown flavour: {}", s))),
-        }
-    }
-}
-impl Serialize for Flavour {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Flavour::Vanilla => serializer.serialize_str("vanilla"),
-            Flavour::Fabric => serializer.serialize_str("fabric"),
-            Flavour::Paper => serializer.serialize_str("paper"),
-            Flavour::Spigot => serializer.serialize_str("spigot"),
-        }
-    }
-}
-
-impl ToString for Flavour {
-    fn to_string(&self) -> String {
-        match self {
-            Flavour::Vanilla => "vanilla".to_string(),
-            Flavour::Fabric => "fabric".to_string(),
-            Flavour::Paper => "paper".to_string(),
-            Flavour::Spigot => "spigot".to_string(),
-        }
-    }
-}
-
 pub trait TConfiurable {
     // getters
     fn uuid(&self) -> String;
