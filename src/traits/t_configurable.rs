@@ -5,11 +5,6 @@ pub use serde::{Deserialize, Serialize};
 
 use super::MaybeUnsupported;
 
-pub enum PropertiesError {
-    NotFound,
-    InvalidValue,
-}
-
 pub trait TConfiurable {
     // getters
     fn uuid(&self) -> String;
@@ -74,8 +69,8 @@ pub trait TConfiurable {
     }
 
     // server config files (server.properties)
-    fn set_field(&mut self, field: &str, value: String) -> Result<(), PropertiesError>;
-    fn get_field(&self, field: &str) -> Result<String, PropertiesError>;
+    fn set_field(&mut self, field: &str, value: String) -> Result<(), super::Error>;
+    fn get_field(&self, field: &str) -> Result<String, super::Error>;
 
     fn setup_params(&self) -> serde_json::Value;
 }
