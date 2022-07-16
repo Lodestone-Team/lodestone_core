@@ -26,5 +26,5 @@ pub trait TServer {
     fn stop(&mut self) -> Result<(), ServerOperationError>;
     fn state(&self) -> State;
     fn send_stdin(&self, command: &str) -> Result<(), StdinOperationError>;
-    fn get_stdout(&self) -> Box<dyn Send + Sync + Iterator<Item = String>>;
+    fn get_stdout(&self) -> Box<dyn Iterator<Item = String>>;
 }

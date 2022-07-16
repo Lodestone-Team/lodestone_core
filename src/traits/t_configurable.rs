@@ -1,5 +1,6 @@
 pub use std::path::PathBuf;
 
+use rocket::serde::json::serde_json;
 pub use serde::{Deserialize, Serialize};
 
 use super::MaybeUnsupported;
@@ -123,4 +124,6 @@ pub trait TConfiurable {
     // server config files (server.properties)
     fn set_field(&mut self, field: &str, value: String) -> Result<(), PropertiesError>;
     fn get_field(&self, field: &str) -> Result<String, PropertiesError>;
+
+    fn setup_params(&self) -> serde_json::Value;
 }
