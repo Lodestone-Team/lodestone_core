@@ -14,6 +14,7 @@ pub enum ErrorInner {
     FailedToReadFile,
     FailedToWriteFile,
     FileOrDirNotFound,
+    FiledOrDirAlreadyExists,
 
     // Stdin/stdout errors:
     FailedToWriteStdin,
@@ -22,14 +23,21 @@ pub enum ErrorInner {
     StdoutNotOpen,
     FailedToAquireLock,
 
+    // Network errors:
+    FailedToUpload,
+    FailedToDownload,
+
     // Instance operation errors
     InstanceAlreadyStarted,
     InstanceAlreadyStopped,
     InstanceAlreadyStarting,
     InstanceAlreadyStopping,
 
-    // File errors:
+    // Config file errors:
     MalformedFile,
+    FieldNotFound,
+    ValueNotFound,
+    TypeMismatch,
 
     // Macro errors:
     FailedToRun

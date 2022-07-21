@@ -38,6 +38,9 @@ pub trait TConfigurable {
     fn backup_period(&self) -> MaybeUnsupported<Option<i32>> {
         MaybeUnsupported::Unsupported
     }
+    fn get_flavours(&self) -> Vec<String> {
+        vec![]
+    }
 
     // setters
     fn set_name(&mut self, name: String);
