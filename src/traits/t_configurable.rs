@@ -61,7 +61,10 @@ pub trait TConfigurable {
     fn set_timeout_last_left(&mut self, timeout_last_left: Option<i32>) -> MaybeUnsupported<()> {
         MaybeUnsupported::Unsupported
     }
-    fn set_timeout_no_activity(&mut self, timeout_no_activity: Option<i32>) -> MaybeUnsupported<()> {
+    fn set_timeout_no_activity(
+        &mut self,
+        timeout_no_activity: Option<i32>,
+    ) -> MaybeUnsupported<()> {
         MaybeUnsupported::Unsupported
     }
     fn set_start_on_connection(&mut self, start_on_connection: bool) -> MaybeUnsupported<()> {
