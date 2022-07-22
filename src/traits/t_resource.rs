@@ -22,7 +22,7 @@ where
 {
     r#mod: Vec<T>,
     world: Vec<T>,
-    xecutable: Vec<T>,
+    executable: Vec<T>,
     runtime: Vec<T>,
 }
 
