@@ -240,6 +240,15 @@ async fn get_jre_url(version: &str) -> Option<(String, u64)> {
     ));
 }
 
+async fn get_list_of_versions(flavour : Flavour) -> Vec<String> {
+    match flavour {
+        Flavour::Vanilla => todo!(),
+        Flavour::Fabric => todo!(),
+        Flavour::Paper => todo!(),
+        Flavour::Spigot => unimplemented!(),
+    }
+}
+
 async fn download_dependencies(
     version: &str,
     flavour: Flavour,
