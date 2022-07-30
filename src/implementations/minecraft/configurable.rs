@@ -8,7 +8,6 @@ use rocket::serde::{self, json::serde_json::json};
 
 use crate::traits::{
     self, t_configurable::TConfigurable, ErrorInner, MaybeUnsupported, MaybeUnsupported::Supported,
-    MaybeUnsupported::Unsupported,
 };
 
 use crate::traits::Error;
@@ -25,11 +24,11 @@ impl TConfigurable for Instance {
     }
 
     fn flavour(&self) -> MaybeUnsupported<String> {
-        Unsupported
+        Supported(self.config.flavour.to_string())
     }
 
     fn jvm_args(&self) -> MaybeUnsupported<Vec<String>> {
-        Unsupported
+        Supported(self.config.jvm_args.clone())
     }
 
     fn description(&self) -> String {
