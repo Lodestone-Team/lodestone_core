@@ -276,7 +276,11 @@ impl TConfigurable for Instance {
             detail: String::new(),
         })?;
         let buf_reader = std::io::BufReader::new(properties_file);
-        let stream = buf_reader.lines().filter(Result::is_ok).map(Result::unwrap);
+        let stream = buf_reader
+            .lines()
+            .filter(Result::is_ok)
+            // this unwrap is safe because we filtered all the ok values
+            .map(Result::unwrap);
 
         for line in stream {
             // if a line starts with '#', it is a comment, skip it
