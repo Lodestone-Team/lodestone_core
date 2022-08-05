@@ -23,7 +23,7 @@ minreq = { version = "2.4.2", features = ["punycode","https-rustls-probe"] }
 serde = { version = "1.0", features = ["derive"] }
 # erased-serde = "0.3"
 chashmap = "2.2.2"
-regex = "1.5.4"
+regex = "1.5.5"
 
 reqwest = { version = "0.11.10", features = ["stream", "blocking"] }
 futures-util = "0.3.14"
