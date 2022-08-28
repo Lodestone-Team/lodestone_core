@@ -72,11 +72,9 @@ pub async fn new_user(
     let hashed_psw = hash_password(&login_request.password);
     let uid = uuid::Uuid::new_v4().to_string();
     let mut users = state.users.lock().await;
-    if !users
+    if !!users
         .get_ref()
-        .iter()
-        .find(|(_, user)| user.username == login_request.username)
-        .is_none()
+        .iter().any(|(_, user)| user.username == login_request.username)
     {
         return Err(Error {
             inner: ErrorInner::UserAlreadyExists,
@@ -278,7 +276,7 @@ pub async fn login(
             )
             .is_err()
         {}
-        Ok(Json(json!(create_jwt(&user, &user.secret)?)))
+        Ok(Json(json!(create_jwt(user, &user.secret)?)))
     } else {
         Err(Error {
             inner: ErrorInner::UserNotFound,

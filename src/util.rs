@@ -67,15 +67,11 @@ pub async fn download_file(
                 },
             )
             // parse filename's value from the header, remove the ""
-            .split(';')
-            .skip(1)
-            .next()
+            .split(';').nth(1)
             .unwrap_or("unknown")
-            .split('=')
-            .skip(1)
-            .next()
+            .split('=').nth(1)
             .unwrap_or("unknown")
-            .replace("\"", "");
+            .replace('\"', "");
     }
     if path.join(&file_name).exists() {
         return Err(Error {
@@ -99,9 +95,9 @@ pub async fn download_file(
     while let Some(item) = stream.next().await {
         let chunk = item.expect("Error while downloading file");
         downloaded_file
-            .write(&chunk)
+            .write_all(&chunk)
             .expect("Error while writing to file");
-        downloaded = downloaded + chunk.len() as u64;
+        downloaded += chunk.len() as u64;
             on_download(DownloadProgress {
                 total: total_size,
                 downloaded,
@@ -115,11 +111,10 @@ pub async fn download_file(
 /// List all files in a directory
 /// files_or_dir = 0 -> files, 1 -> directories
 pub fn list_dir(path: &Path, filter_file_or_dir: Option<bool>) -> Result<Vec<PathBuf>, Error> {
-    let ret: Vec<PathBuf> = std::fs::read_dir(&path)
-        .or(Err(Error {
+    let ret: Vec<PathBuf> = std::fs::read_dir(&path).map_err(|_| Error {
             inner: ErrorInner::FailedToReadFileOrDir,
             detail: "".to_string(),
-        }))?
+        })?
         .into_iter()
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_ok())
@@ -151,10 +146,10 @@ pub fn unzip_file(
     if !_7zip_path.is_file() {
         return Err(Error{ inner: ErrorInner::FileOrDirNotFound, detail: format!("Runtime dependency {} is not found at {}. Consider downloading the dependency to .lodestone/bin/7zip/, or reinstall Lodestone", format!("7z_{}_{}", os, arch), _7zip_path.display()) });
     }
-    std::fs::create_dir_all(dest).or(Err(Error {
+    std::fs::create_dir_all(dest).map_err(|_| Error {
         inner: ErrorInner::FailedToWriteFileOrDir,
         detail: format!("Failed to create directory {}", dest.display()),
-    }))?;
+    })?;
     let before: HashSet<PathBuf>;
 
     let tmp_dir = dest.join("tmp_1c92md");
@@ -168,17 +163,15 @@ pub fn unzip_file(
             .arg(file)
             .arg("-aoa")
             .arg(format!("-o{}", tmp_dir.display()))
-            .status()
-            .or(Err(Error {
+            .status().map_err(|_| Error {
                 inner: ErrorInner::FailedToExecute,
                 detail: "Failed to execute 7zip".to_string(),
-            }))?;
+            })?;
 
-        before = list_dir(dest, None)
-            .or(Err(Error {
+        before = list_dir(dest, None).map_err(|_| Error {
                 inner: ErrorInner::FailedToReadFileOrDir,
                 detail: "".to_string(),
-            }))?
+            })?
             .iter()
             .cloned()
             .collect();
@@ -189,11 +182,10 @@ pub fn unzip_file(
             .arg("-aoa")
             .arg("-ttar")
             .arg(format!("-o{}", dest.display()))
-            .status()
-            .or(Err(Error {
+            .status().map_err(|_| Error {
                 inner: ErrorInner::FailedToExecute,
                 detail: "Failed to execute 7zip".to_string(),
-            }))?;
+            })?;
     } else {
         before = list_dir(dest, None)
             .or(Err(Error {

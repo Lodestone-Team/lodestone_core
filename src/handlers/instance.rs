@@ -97,7 +97,6 @@ pub async fn create_instance(
                 inner: ErrorInner::MalformedRequest,
                 detail: "Name is not a string".to_string(),
             })?
-            .to_string()
             == name
         {
             return Err(Error {
