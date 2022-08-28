@@ -1,4 +1,6 @@
 
+#![allow(clippy::comparison_chain, clippy::type_complexity)]
+
 use crate::{
     handlers::instance::{list_instance, start_instance},
     handlers::{

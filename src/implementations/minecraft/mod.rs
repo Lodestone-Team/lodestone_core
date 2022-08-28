@@ -654,7 +654,6 @@ impl Instance {
             let uuid = config.uuid.clone();
             let name = config.name.clone();
             move |old_players: &HashSet<String>, new_players: &HashSet<String>| {
-                #[allow(clippy::comparison_chain)]
                 if old_players.len() > new_players.len() {
                     let player_diff = old_players.difference(new_players).last().unwrap();
                     debug!("[{}] Detected player joined: {}", name, player_diff);
