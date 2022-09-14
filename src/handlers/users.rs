@@ -16,6 +16,7 @@ use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use systemstat::Utc;
+use ts_rs::TS;
 
 use super::util::{hash_password, is_authorized, try_auth};
 #[derive(Deserialize, Serialize)]
@@ -264,7 +265,8 @@ pub async fn change_password(
     Ok(Json(json!("ok")))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[ts(export)]
 pub struct LoginReply {
     token: String,
     user: PublicUser,

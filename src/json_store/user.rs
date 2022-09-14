@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use super::permission::Permission;
 #[derive(Serialize, Deserialize, Clone)]
@@ -14,7 +15,8 @@ pub struct User {
     pub secret: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export)]
 pub struct PublicUser {
     pub uid: String,
     pub username: String,
