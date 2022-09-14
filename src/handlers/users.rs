@@ -252,10 +252,16 @@ pub async fn change_password(
     Ok(Json(json!("ok")))
 }
 
+#[derive(Serialize)]
+pub struct LoginReply {
+    token: String,
+    user: PublicUser,
+}
+
 pub async fn login(
     Extension(state): Extension<AppState>,
     AuthBasic((username, psw)): AuthBasic,
-) -> Result<Json<Value>, Error> {
+) -> Result<Json<LoginReply>, Error> {
     if psw.is_none() {
         return Err(Error {
             inner: ErrorInner::MalformedRequest,
@@ -282,10 +288,10 @@ pub async fn login(
                 detail: "Invalid username or password".to_string(),
             })
         } else {
-            Ok(Json(json!({
-                "token": create_jwt(user, &user.secret)?,
-                "user": PublicUser::from(user.to_owned()),
-            })))
+            Ok(Json(LoginReply {
+                token: create_jwt(user, &user.secret)?,
+                user: PublicUser::from(user.to_owned()),
+            }))
         }
     } else {
         Err(Error {
