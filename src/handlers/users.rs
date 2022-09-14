@@ -1,7 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    json_store::{permission::Permission, user::{User, PublicUser}},
+    json_store::{
+        permission::Permission,
+        user::{PublicUser, User},
+    },
     traits::{Error, ErrorInner},
     util::rand_alphanumeric,
     AppState,
@@ -65,16 +68,18 @@ pub async fn new_user(
             detail: "You are not authorized to create users".to_string(),
         });
     }
-    let login_request: NewUserSchema = serde_json::from_value(config.clone()).map_err(|_| Error {
-        inner: ErrorInner::MalformedRequest,
-        detail: "Invalid request".to_string(),
-    })?;
+    let login_request: NewUserSchema =
+        serde_json::from_value(config.clone()).map_err(|_| Error {
+            inner: ErrorInner::MalformedRequest,
+            detail: "Invalid request".to_string(),
+        })?;
     let hashed_psw = hash_password(&login_request.password);
     let uid = uuid::Uuid::new_v4().to_string();
     let mut users = state.users.lock().await;
     if users
         .get_ref()
-        .iter().any(|(_, user)| user.username == login_request.username)
+        .iter()
+        .any(|(_, user)| user.username == login_request.username)
     {
         return Err(Error {
             inner: ErrorInner::UserAlreadyExists,
@@ -157,16 +162,14 @@ pub async fn update_permissions(
             inner: ErrorInner::MalformedRequest,
             detail: "Invalid request".to_string(),
         })?;
-    users
-        .transform(Box::new(move |v| {
-            let user = v.get_mut(&uid).ok_or(Error {
-                inner: ErrorInner::UserNotFound,
-                detail: "".to_string(),
-            })?;
-            user.permissions = permissions_update_request.permissions.clone();
-            Ok(())
-        }))
-        ?;
+    users.transform(Box::new(move |v| {
+        let user = v.get_mut(&uid).ok_or(Error {
+            inner: ErrorInner::UserNotFound,
+            detail: "".to_string(),
+        })?;
+        user.permissions = permissions_update_request.permissions.clone();
+        Ok(())
+    }))?;
     Ok(Json(json!("ok")))
 }
 

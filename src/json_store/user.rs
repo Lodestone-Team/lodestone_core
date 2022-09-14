@@ -8,18 +8,18 @@ pub struct User {
     pub uid: String,
     pub username: String,
     pub hashed_psw: String,
-    pub is_owner : bool,
-    pub is_admin : bool,
+    pub is_owner: bool,
+    pub is_admin: bool,
     pub permissions: HashMap<Permission, HashSet<String>>,
-    pub secret: String
+    pub secret: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PublicUser {
     pub uid: String,
     pub username: String,
-    pub is_owner : bool,
-    pub is_admin : bool,
+    pub is_owner: bool,
+    pub is_admin: bool,
     pub permissions: HashMap<Permission, HashSet<String>>,
 }
 
