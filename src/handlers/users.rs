@@ -173,11 +173,23 @@ pub async fn update_permissions(
     Ok(Json(json!("ok")))
 }
 
+pub async fn get_self_info(
+    Extension(state): Extension<AppState>,
+    AuthBearer(token): AuthBearer,
+) -> Result<Json<PublicUser>, Error> {
+    let users = state.users.lock().await;
+    let user = try_auth(&token, users.get_ref()).ok_or(Error {
+        inner: ErrorInner::PermissionDenied,
+        detail: "".to_string(),
+    })?;
+    Ok(Json(PublicUser::from(user)))
+}
+
 pub async fn get_user_info(
     Extension(state): Extension<AppState>,
     Path(uid): Path<String>,
     AuthBearer(token): AuthBearer,
-) -> Result<Json<Value>, Error> {
+) -> Result<Json<PublicUser>, Error> {
     let users = state.users.lock().await;
     let requester = try_auth(&token, users.get_ref()).ok_or(Error {
         inner: ErrorInner::PermissionDenied,
@@ -197,7 +209,7 @@ pub async fn get_user_info(
             detail: "".to_string(),
         })?
         .to_owned();
-    Ok(Json(json!(PublicUser::from(user))))
+    Ok(Json(PublicUser::from(user)))
 }
 
 pub async fn change_password(
