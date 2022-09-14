@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    json_store::{permission::Permission, user::User},
+    json_store::{permission::Permission, user::{User, PublicUser}},
     traits::{Error, ErrorInner},
     util::rand_alphanumeric,
     AppState,
@@ -186,7 +186,7 @@ pub async fn get_user_info(
             detail: "You are not authorized to get this user's info".to_string(),
         });
     }
-    let mut user = users
+    let user = users
         .get_ref()
         .get(&uid)
         .ok_or(Error {
@@ -194,9 +194,7 @@ pub async fn get_user_info(
             detail: "".to_string(),
         })?
         .to_owned();
-    user.hashed_psw = "".to_string();
-    user.secret = "".to_string();
-    Ok(Json(json!(user)))
+    Ok(Json(json!(PublicUser::from(user))))
 }
 
 pub async fn change_password(
@@ -281,7 +279,10 @@ pub async fn login(
                 detail: "Invalid username or password".to_string(),
             })
         } else {
-            Ok(Json(json!(create_jwt(user, &user.secret)?)))
+            Ok(Json(json!({
+                "token": create_jwt(user, &user.secret)?,
+                "user": PublicUser::from(user.to_owned()),
+            })))
         }
     } else {
         Err(Error {
