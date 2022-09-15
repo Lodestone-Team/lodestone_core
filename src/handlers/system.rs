@@ -7,6 +7,7 @@ use sys_info::{
     cpu_num, cpu_speed, disk_info, loadavg, mem_info, os_release, os_type, DiskInfo, MemInfo,
 };
 use systemstat::{CPULoad, Duration, Platform, System};
+use tokio::time::sleep;
 extern crate systemstat;
 
 // Since MemInfo is not serializable, we need to create a new struct that is serializable.
@@ -63,7 +64,6 @@ pub async fn get_disk() -> Json<DiskInfoDef> {
 
 #[derive(Serialize, Deserialize)]
 pub struct CPUInfo {
-    pub cpu_vendor: String,
     pub cpu_speed: u64,
     pub cpu_load: f32,
 }
@@ -71,12 +71,11 @@ pub struct CPUInfo {
 pub async fn get_cpu() -> Json<CPUInfo> {
     let sys = System::new();
     let cpu_aggregate = sys.cpu_load_aggregate().expect("Failed to get cpu load");
-    thread::sleep(Duration::from_secs(1));
+    sleep(Duration::from_secs(1)).await;
     let cpu_load = cpu_aggregate.done().expect("Failed to get cpu load");
 
     Json(CPUInfo {
-        cpu_vendor: "TODO".to_string(),
-        cpu_speed: cpu_speed().unwrap(),
+        cpu_speed: cpu_speed().expect("Failed to get cpu speed"),
         cpu_load: cpu_load.user,
     })
 }
