@@ -3,7 +3,7 @@
 use crate::{
     handlers::instance::{list_instance, start_instance},
     handlers::{
-        events::{event_stream, get_event_buffer},
+        events::{event_stream, get_event_buffer, console_stream},
         instance::{
             create_instance, get_instance_state, kill_instance, remove_instance, send_command,
             stop_instance,
@@ -261,6 +261,7 @@ async fn main() {
     let api_routes = Router::new()
         .route("/events/stream", get(event_stream))
         .route("/events/buffer", get(get_event_buffer))
+        .route("/console", get(console_stream))
         .route("/instances/list", get(list_instance))
         .route("/instances/new/:idempotency", post(create_instance))
         .route("/instances/start/:uuid", post(start_instance))
