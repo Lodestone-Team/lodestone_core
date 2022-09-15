@@ -12,7 +12,8 @@ use crate::{
             get_cpu, get_disk, get_os_info, get_ram,
             get_uptime,
         },
-        users::{change_password, delete_user, get_user_info, login, new_user, update_permissions},
+        users::{change_password, delete_user, get_user_info, login, new_user, update_permissions, get_self_info},
+        events::{event_stream, get_event_buffer},
     },
     traits::Error,
     util::rand_alphanumeric,
@@ -271,6 +272,7 @@ async fn main() {
         .route("/instances/state/:uuid", get(get_instance_state))
         .route("/users/create", post(new_user))
         .route("/users/delete/:uid", delete(delete_user))
+        .route("/users/info", get(get_self_info))
         .route("/users/info/:uid", get(get_user_info))
         .route("/users/update_perm", post(update_permissions))
         .route("/users/login", get(login))
