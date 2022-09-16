@@ -13,7 +13,6 @@ use crate::{
             get_uptime,
         },
         users::{change_password, delete_user, get_user_info, login, new_user, update_permissions, get_self_info},
-        events::{event_stream, get_event_buffer},
     },
     traits::Error,
     util::rand_alphanumeric,
