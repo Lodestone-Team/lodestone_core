@@ -27,6 +27,7 @@ use super::util::{can_user_view_event, parse_bearer_token, try_auth};
 pub async fn get_event_buffer(
     Extension(state): Extension<AppState>,
     AuthBearer(token): AuthBearer,
+    Path(uuid): Path<String>,
 ) -> Result<Json<Vec<Event>>, Error> {
     let requester = try_auth(&token, state.users.lock().await.get_ref()).ok_or(Error {
         inner: ErrorInner::PermissionDenied,
@@ -40,7 +41,10 @@ pub async fn get_event_buffer(
             .get_ref()
             .iter()
             .rev()
-            .filter(|event| can_user_view_event(event, &requester))
+            .filter(|event| {
+                (event.instance_uuid == uuid || uuid == "all")
+                    && can_user_view_event(event, &requester)
+            })
             .cloned()
             .collect(),
     ))
@@ -64,8 +68,7 @@ pub async fn get_console_out_buffer(
             .iter()
             .rev()
             .filter(|event| {
-                event.instance_uuid == uuid
-                    && matches!(event.event_inner, EventInner::InstanceOutput(_))
+                (event.instance_uuid == uuid || uuid == "all")
                     && can_user_view_event(event, &requester)
             })
             .cloned()
@@ -96,17 +99,24 @@ pub async fn event_stream(
     let users = state.users.clone();
     let event_receiver = state.event_broadcaster.subscribe();
 
-    Ok(ws.on_upgrade(move |socket| websocket(socket, event_receiver, user.uid, users)))
+    Ok(ws.on_upgrade(move |socket| {
+        event_stream_ws(socket, event_receiver, query.uuid.clone(), user.uid, users)
+    }))
 }
 
-async fn websocket(
+async fn event_stream_ws(
     stream: WebSocket,
     mut event_receiver: Receiver<Event>,
+    uuid: String,
     uid: String,
     users: Arc<Mutex<Stateful<HashMap<String, User>>>>,
 ) {
     let (mut sender, mut _receiver) = stream.split();
+
     while let Ok(event) = event_receiver.recv().await {
+        if event.instance_uuid != uuid && uuid != "all" {
+            continue;
+        }
         if can_user_view_event(
             &event,
             match users.lock().await.get_ref().get(&uid) {
@@ -146,10 +156,10 @@ pub async fn console_stream(
     let event_receiver = state.event_broadcaster.subscribe();
 
     Ok(ws
-        .on_upgrade(move |socket| console_websocket(socket, event_receiver, user.uid, uuid, users)))
+        .on_upgrade(move |socket| console_stream_ws(socket, event_receiver, user.uid, uuid, users)))
 }
 
-async fn console_websocket(
+async fn console_stream_ws(
     stream: WebSocket,
     mut event_receiver: Receiver<Event>,
     uid: String,
@@ -158,7 +168,7 @@ async fn console_websocket(
 ) {
     let (mut sender, mut _receiver) = stream.split();
     while let Ok(event) = event_receiver.recv().await {
-        if event.instance_uuid != uuid {
+        if event.instance_uuid != uuid && uuid != "all" {
             continue;
         }
         match event.event_inner {

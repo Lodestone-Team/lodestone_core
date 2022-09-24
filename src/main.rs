@@ -282,7 +282,7 @@ async fn main() {
 
     let api_routes = Router::new()
         .route("/events/stream", get(event_stream))
-        .route("/events/buffer", get(get_event_buffer))
+        .route("/events/buffer/:uuid", get(get_event_buffer))
         .route("/console/stream/", get(console_stream))
         .route("/console/buffer/:uuid", get(get_console_out_buffer))
         .route("/instances/list", get(list_instance))
