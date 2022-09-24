@@ -11,6 +11,7 @@
 
 ## vscode local history
 .history/
+.vscode
 
 # Test ground should be local to every developer
 src/test_ground/
@@ -25,5 +26,5 @@ web
 lodestone-path/
 
 bindings/
-
+test_ground/
 run.sh
