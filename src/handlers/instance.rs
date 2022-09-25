@@ -369,9 +369,15 @@ pub async fn kill_instance(
     Ok(Json(json!("ok")))
 }
 
+#[derive(Deserialize)]
+pub struct SendCommandQuery {
+    command: String,
+}
+
 pub async fn send_command(
     Extension(state): Extension<AppState>,
-    Path((uuid, cmd)): Path<(String, String)>,
+    Path(uuid): Path<String>,
+    Query(query): Query<SendCommandQuery>,
 ) -> Result<Json<Value>, Error> {
     match state
         .instances
@@ -384,7 +390,7 @@ pub async fn send_command(
         })?
         .lock()
         .await
-        .send_command(&cmd)
+        .send_command(&query.command)
     {
         crate::traits::MaybeUnsupported::Supported(v) => v.map(|_| Json(json!("ok"))),
         crate::traits::MaybeUnsupported::Unsupported => Err(Error {
