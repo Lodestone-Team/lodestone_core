@@ -296,6 +296,7 @@ async fn main() {
         .allow_methods([
             Method::GET,
             Method::POST,
+            Method::PUT,
             Method::OPTIONS,
             Method::PATCH,
             Method::DELETE,
