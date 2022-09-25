@@ -43,7 +43,6 @@ pub async fn get_client_info(Extension(state): Extension<AppState>) -> Json<Clie
         total_ram: sys.total_memory(),
         total_disk: sys.disks().iter().fold(0, |acc, v| acc + v.total_space()),
         client_name: state.client_name.lock().await.clone(),
-        uuid: (*state.uuid).clone(),
+        uuid: state.uuid.clone(),
     })
 }
-

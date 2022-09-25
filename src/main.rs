@@ -3,6 +3,7 @@
 use crate::{
     handlers::instance::{list_instance, start_instance},
     handlers::{
+        client_info::get_client_info,
         events::{console_stream, event_stream, get_console_out_buffer, get_event_buffer},
         instance::{
             create_instance, get_instance_state, kill_instance, remove_instance, send_command,
@@ -12,7 +13,7 @@ use crate::{
         users::{
             change_password, delete_user, get_self_info, get_user_info, login, new_user,
             update_permissions,
-        }, client_info::get_client_info,
+        },
     },
     traits::Error,
     util::rand_alphanumeric,
@@ -75,7 +76,7 @@ pub struct AppState {
     console_out_buffer: Arc<Mutex<Stateful<AllocRingBuffer<Event>>>>,
     event_broadcaster: Sender<Event>,
     is_setup: Arc<AtomicBool>,
-    uuid: Arc<String>,
+    uuid: String,
     client_name: Arc<Mutex<String>>,
 }
 
@@ -250,7 +251,7 @@ async fn main() {
         console_out_buffer: Arc::new(Mutex::new(stateful_console_out_buffer)),
         event_broadcaster: tx.clone(),
         is_setup: Arc::new(AtomicBool::new(false)),
-        uuid: Arc::new(Uuid::new_v4().to_string()),
+        uuid: Uuid::new_v4().to_string(),
         client_name: Arc::new(Mutex::new(format!(
             "{}'s Lodestone client",
             whoami::realname()
