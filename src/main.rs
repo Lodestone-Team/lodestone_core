@@ -315,7 +315,7 @@ async fn main() {
         .route("/instance/:uuid/stop", put(stop_instance))
         .route("/instance/:uuid/delete", put(remove_instance))
         .route("/instance/:uuid/kill", put(kill_instance))
-        .route("/instance/state/:uuid", get(get_instance_state))
+        .route("/instance/:uuid/state", get(get_instance_state))
         .route("/user/create", post(new_user))
         .route("/user/:user_id/delete", put(delete_user))
         .route("/user/info", get(get_self_info))
