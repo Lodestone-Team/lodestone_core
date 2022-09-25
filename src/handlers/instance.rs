@@ -70,14 +70,14 @@ pub async fn list_instance(
     .await
     .into_iter()
     .collect();
-    
+
     list_of_configs.sort_by(|a, b| a.creation_time.cmp(&b.creation_time));
-    
+
     Ok(Json(list_of_configs))
 }
 
 #[derive(Deserialize)]
-pub struct InstanceCreateQuery{
+pub struct InstanceCreateQuery {
     pub key: String,
 }
 
@@ -417,3 +417,80 @@ pub async fn get_instance_state(
         .await
         .state())))
 }
+
+pub async fn get_player_count(
+    Extension(state): Extension<AppState>,
+    Path(uuid): Path<String>,
+) -> Result<Json<u32>, Error> {
+    match state
+        .instances
+        .lock()
+        .await
+        .get(&uuid)
+        .ok_or(Error {
+            inner: ErrorInner::InstanceNotFound,
+            detail: "".to_string(),
+        })?
+        .lock()
+        .await
+        .get_player_count()
+    {
+        crate::traits::MaybeUnsupported::Supported(v) => Ok(Json(v)),
+        crate::traits::MaybeUnsupported::Unsupported => Err(Error {
+            inner: ErrorInner::UnsupportedOperation,
+            detail: "".to_string(),
+        }),
+    }
+}
+
+pub async fn get_max_player_count(
+    Extension(state): Extension<AppState>,
+    Path(uuid): Path<String>,
+) -> Result<Json<u32>, Error> {
+    match state
+        .instances
+        .lock()
+        .await
+        .get(&uuid)
+        .ok_or(Error {
+            inner: ErrorInner::InstanceNotFound,
+            detail: "".to_string(),
+        })?
+        .lock()
+        .await
+        .get_max_player_count()
+    {
+        crate::traits::MaybeUnsupported::Supported(v) => Ok(Json(v)),
+        crate::traits::MaybeUnsupported::Unsupported => Err(Error {
+            inner: ErrorInner::UnsupportedOperation,
+            detail: "".to_string(),
+        }),
+    }
+}
+
+pub async fn get_player_list(
+    Extension(state): Extension<AppState>,
+    Path(uuid): Path<String>,
+) -> Result<Json<Vec<Value>>, Error> {
+    match state
+        .instances
+        .lock()
+        .await
+        .get(&uuid)
+        .ok_or(Error {
+            inner: ErrorInner::InstanceNotFound,
+            detail: "".to_string(),
+        })?
+        .lock()
+        .await
+        .get_player_list()
+    {
+        crate::traits::MaybeUnsupported::Supported(v) => Ok(Json(v)),
+        crate::traits::MaybeUnsupported::Unsupported => Err(Error {
+            inner: ErrorInner::UnsupportedOperation,
+            detail: "".to_string(),
+        }),
+    }
+}
+
+

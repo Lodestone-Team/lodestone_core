@@ -7,7 +7,7 @@ use crate::{
         events::{console_stream, event_stream, get_console_out_buffer, get_event_buffer},
         instance::{
             create_instance, get_instance_state, kill_instance, remove_instance, send_command,
-            stop_instance,
+            stop_instance, get_player_count, get_max_player_count, get_player_list,
         },
         system::{get_cpu_info, get_disk, get_ram},
         users::{
@@ -316,6 +316,9 @@ async fn main() {
         .route("/instance/:uuid/delete", put(remove_instance))
         .route("/instance/:uuid/kill", put(kill_instance))
         .route("/instance/:uuid/state", get(get_instance_state))
+        .route("/instance/:uuid/player_count", get(get_player_count))
+        .route("/instance/:uuid/max_player_count", get(get_max_player_count))
+        .route("/instance/:uuid/player_list", get(get_player_list))
         .route("/user/create", post(new_user))
         .route("/user/:user_id/delete", put(delete_user))
         .route("/user/info", get(get_self_info))
