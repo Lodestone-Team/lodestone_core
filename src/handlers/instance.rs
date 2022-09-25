@@ -1,5 +1,6 @@
 use std::{env, sync::Arc};
 
+use axum::extract::Query;
 use axum::{extract::Path, Extension, Json};
 use axum_auth::AuthBearer;
 use futures::future::join_all;
@@ -74,10 +75,16 @@ pub async fn list_instance(
     
     Ok(Json(list_of_configs))
 }
+
+#[derive(Deserialize)]
+pub struct InstanceCreateQuery{
+    pub key: String,
+}
+
 pub async fn create_instance(
     Extension(state): Extension<AppState>,
-    Path(idempotency): Path<String>,
     Json(config): Json<Value>,
+    Query(query): Query<InstanceCreateQuery>,
 ) -> Result<Json<Value>, Error> {
     let game_type = config
         .get("type")
@@ -252,7 +259,7 @@ pub async fn create_instance(
                     minecraft::Instance::new(
                         mc_config,
                         state.event_broadcaster.clone(),
-                        Some(idempotency),
+                        Some(query.key),
                     )
                     .await?,
                 )),
