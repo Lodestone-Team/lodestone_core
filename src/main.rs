@@ -326,7 +326,7 @@ async fn main() {
         .route("/system/memory", get(get_ram))
         .route("/system/disk", get(get_disk))
         .route("/system/cpu", get(get_cpu_info))
-        .route("/manifest", get(get_client_info))
+        .route("/info", get(get_client_info))
         .layer(Extension(shared_state))
         .layer(cors);
     let app = Router::new().nest("/api/v1", api_routes);
