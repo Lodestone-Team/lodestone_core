@@ -19,6 +19,7 @@ pub struct ClientInfo {
     host_name: String,
     uuid: String,
     client_name: String,
+    up_since : i64,
 }
 
 pub async fn get_client_info(Extension(state): Extension<AppState>) -> Json<ClientInfo> {
@@ -44,5 +45,6 @@ pub async fn get_client_info(Extension(state): Extension<AppState>) -> Json<Clie
         total_disk: sys.disks().iter().fold(0, |acc, v| acc + v.total_space()),
         client_name: state.client_name.lock().await.clone(),
         uuid: state.uuid.clone(),
+        up_since: state.up_since,
     })
 }

@@ -78,6 +78,7 @@ pub struct AppState {
     is_setup: Arc<AtomicBool>,
     uuid: String,
     client_name: Arc<Mutex<String>>,
+    up_since : i64,
 }
 
 fn restore_instances(
@@ -256,6 +257,7 @@ async fn main() {
             "{}'s Lodestone client",
             whoami::realname()
         ))),
+        up_since : chrono::Utc::now().timestamp(),
     };
 
     let event_buffer_task = tokio::spawn({
