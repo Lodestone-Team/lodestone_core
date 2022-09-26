@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use ts_rs::TS;
 
-use crate::traits::MaybeUnsupported::{Supported, Unsupported};
+use crate::traits::{Supported, Unsupported};
 
 use super::util::{is_authorized, try_auth};
 use crate::json_store::permission::Permission::{self};
@@ -392,8 +392,8 @@ pub async fn send_command(
         .await
         .send_command(&query.command)
     {
-        crate::traits::MaybeUnsupported::Supported(v) => v.map(|_| Json(json!("ok"))),
-        crate::traits::MaybeUnsupported::Unsupported => Err(Error {
+        Supported(v) => v.map(|_| Json(json!("ok"))),
+        Unsupported => Err(Error {
             inner: ErrorInner::InstanceNotFound,
             detail: "".to_string(),
         }),
@@ -435,8 +435,8 @@ pub async fn get_player_count(
         .await
         .get_player_count()
     {
-        crate::traits::MaybeUnsupported::Supported(v) => Ok(Json(v)),
-        crate::traits::MaybeUnsupported::Unsupported => Err(Error {
+        Supported(v) => Ok(Json(v)),
+        Unsupported => Err(Error {
             inner: ErrorInner::UnsupportedOperation,
             detail: "".to_string(),
         }),
@@ -460,8 +460,8 @@ pub async fn get_max_player_count(
         .await
         .get_max_player_count()
     {
-        crate::traits::MaybeUnsupported::Supported(v) => Ok(Json(v)),
-        crate::traits::MaybeUnsupported::Unsupported => Err(Error {
+        Supported(v) => Ok(Json(v)),
+        Unsupported => Err(Error {
             inner: ErrorInner::UnsupportedOperation,
             detail: "".to_string(),
         }),
@@ -485,8 +485,8 @@ pub async fn get_player_list(
         .await
         .get_player_list()
     {
-        crate::traits::MaybeUnsupported::Supported(v) => Ok(Json(v)),
-        crate::traits::MaybeUnsupported::Unsupported => Err(Error {
+        Supported(v) => Ok(Json(v)),
+        Unsupported => Err(Error {
             inner: ErrorInner::UnsupportedOperation,
             detail: "".to_string(),
         }),
