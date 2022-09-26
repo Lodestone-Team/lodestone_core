@@ -55,14 +55,8 @@ pub async fn list_instance(
                     game_type: instance.game_type(),
                     flavour: instance.flavour(),
                     state: instance.state(),
-                    player_count: match instance.get_player_count() {
-                        Supported(x) => x,
-                        Unsupported => 0,
-                    },
-                    max_player_count: match instance.get_max_player_count() {
-                        Supported(x) => x,
-                        Unsupported => 0,
-                    },
+                    player_count: instance.get_player_count().unwrap_or(0),
+                    max_player_count: instance.get_max_player_count().unwrap_or(0),
                     creation_time: instance.creation_time(),
                 }
             }),
@@ -394,7 +388,7 @@ pub async fn send_command(
     {
         Supported(v) => v.map(|_| Json(json!("ok"))),
         Unsupported => Err(Error {
-            inner: ErrorInner::InstanceNotFound,
+            inner: ErrorInner::UnsupportedOperation,
             detail: "".to_string(),
         }),
     }
