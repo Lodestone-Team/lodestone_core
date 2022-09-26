@@ -4,7 +4,7 @@ pub use serde_json;
 pub use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::traits::{MaybeUnsupported, Supported, Unsupported};
+use crate::traits::{MaybeUnsupported, Unsupported};
 
 pub trait TConfigurable {
     // getters
