@@ -1,6 +1,6 @@
 [package]
 name = "Lodestone"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 exclude = [
@@ -54,6 +54,8 @@ chrono = "0.4.22"
 ringbuffer = "0.8.5"
 semver = {version="1.0", features = ["serde"]}
 whoami = "1.2.3"
+home = "0.5.3"
+port_scanner = "0.1.5"
 [dependencies.uuid]
 version = "1.1.2"
 features = [
