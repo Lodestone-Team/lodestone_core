@@ -1,6 +1,6 @@
 use std::{env, sync::atomic::Ordering};
 
-use crate::{AppState, VERSION};
+use crate::{AppState, prelude::VERSION};
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 use sysinfo::{CpuExt, DiskExt, System, SystemExt};
@@ -29,7 +29,10 @@ pub async fn get_client_info(Extension(state): Extension<AppState>) -> Json<Clie
         os: env::consts::OS.to_string(),
         arch: env::consts::ARCH.to_string(),
         cpu: {
-            let cpu_str = sys.cpus().first().map_or_else(|| "Unknown CPU", |v| v.brand());
+            let cpu_str = sys
+                .cpus()
+                .first()
+                .map_or_else(|| "Unknown CPU", |v| v.brand());
             if cpu_str.is_empty() {
                 "Unknown CPU".to_string()
             } else {

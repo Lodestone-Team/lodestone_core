@@ -3,11 +3,16 @@
 use crate::{
     handlers::instance::{list_instance, start_instance},
     handlers::{
+        checks::{is_name_in_use, is_port_in_use},
         client_info::get_client_info,
         events::{console_stream, event_stream, get_console_out_buffer, get_event_buffer},
         instance::{
-            create_instance, get_instance_state, kill_instance, remove_instance, send_command,
-            stop_instance, get_player_count, get_max_player_count, get_player_list,
+            create_minecraft_instance, get_instance_state, get_max_player_count, get_player_count,
+            get_player_list, kill_instance, remove_instance, send_command, stop_instance,
+        },
+        instance_manifest::get_instance_manifest,
+        instance_setup_configs::{
+            get_available_flavours, get_available_games, get_available_versions,
         },
         system::{get_cpu_info, get_disk, get_ram},
         users::{
@@ -15,28 +20,29 @@ use crate::{
             update_permissions,
         },
     },
+    prelude::LODESTONE_PATH,
     traits::Error,
     util::rand_alphanumeric,
 };
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use axum::{
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Extension, Router,
 };
 use events::Event;
 use implementations::minecraft;
 use json_store::user::User;
 use log::{debug, info};
+use port_allocator::PortAllocator;
 use rand_core::OsRng;
 use reqwest::{header, Method};
 use ringbuffer::{AllocRingBuffer, RingBufferWrite};
-use semver::{BuildMetadata, Prerelease};
 use serde_json::Value;
 use stateful::Stateful;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::SocketAddr,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{atomic::AtomicBool, Arc},
 };
 use tokio::{
@@ -55,18 +61,11 @@ mod events;
 mod handlers;
 mod implementations;
 mod json_store;
+mod port_allocator;
+pub mod prelude;
 mod stateful;
 mod traits;
 mod util;
-thread_local! {
-    pub static VERSION: semver::Version = semver::Version {
-        major: 0,
-        minor: 0,
-        patch: 1,
-        pre: Prerelease::new("alpha.1").unwrap(),
-        build: BuildMetadata::EMPTY,
-    };
-}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -79,6 +78,7 @@ pub struct AppState {
     uuid: String,
     client_name: Arc<Mutex<String>>,
     up_since: i64,
+    port_allocator: Arc<Mutex<PortAllocator>>,
 }
 
 fn restore_instances(
@@ -103,7 +103,7 @@ fn restore_instances(
             config
         })
         .map(|config| {
-            match config["type"]
+            match config["game_type"]
                 .as_str()
                 .unwrap()
                 .to_ascii_lowercase()
@@ -156,10 +156,7 @@ async fn main() {
         // .format_timestamp(None)
         .format_target(false)
         .init();
-    let lodestone_path = PathBuf::from(
-        std::env::var("LODESTONE_PATH")
-            .unwrap_or_else(|_| std::env::current_dir().unwrap().display().to_string()),
-    );
+    let lodestone_path = LODESTONE_PATH.with(|path| path.clone());
     std::env::set_current_dir(&lodestone_path).expect("Failed to set current dir");
 
     let web_path = lodestone_path.join("web");
@@ -248,9 +245,14 @@ async fn main() {
         info!("Username: owner");
         info!("Password: {}", owner_psw);
     }
-
+    let instances = restore_instances(&lodestone_path, &tx);
+    let mut allocated_ports = HashSet::new();
+    for (_, instance) in instances.iter() {
+        let instance = instance.lock().await;
+        allocated_ports.insert(instance.port());
+    }
     let shared_state = AppState {
-        instances: Arc::new(Mutex::new(restore_instances(&lodestone_path, &tx))),
+        instances: Arc::new(Mutex::new(instances)),
         users: Arc::new(Mutex::new(stateful_users)),
         events_buffer: Arc::new(Mutex::new(stateful_event_buffer)),
         console_out_buffer: Arc::new(Mutex::new(stateful_console_out_buffer)),
@@ -262,6 +264,7 @@ async fn main() {
             whoami::realname()
         ))),
         up_since: chrono::Utc::now().timestamp(),
+        port_allocator: Arc::new(Mutex::new(PortAllocator::new(allocated_ports))),
     };
 
     let event_buffer_task = tokio::spawn({
@@ -312,17 +315,36 @@ async fn main() {
         .route("/events/:uuid/stream", get(event_stream))
         .route("/events/:uuid/buffer", get(get_event_buffer))
         .route("/instance/:uuid/console/stream", get(console_stream))
-        .route("/instance/:uuid/console/buffer", get(get_console_out_buffer))
+        .route(
+            "/instance/:uuid/console/buffer",
+            get(get_console_out_buffer),
+        )
         .route("/instance/:uuid/console", post(send_command))
+        .route("/instance_setup_info/games", get(get_available_games))
+        .route(
+            "/instance_setup_info/flavours/:game_type",
+            get(get_available_flavours),
+        )
+        .route(
+            "/instance_setup_info/:game_type/versions/:flavour",
+            get(get_available_versions),
+        )
         .route("/instance/list", get(list_instance))
-        .route("/instance/create", post(create_instance))
+        .route("/instance/:uuid/manifest", get(get_instance_manifest))
+        .route(
+            "/instance/minecraft/create",
+            post(create_minecraft_instance),
+        )
         .route("/instance/:uuid/start", put(start_instance))
         .route("/instance/:uuid/stop", put(stop_instance))
         .route("/instance/:uuid/delete", put(remove_instance))
         .route("/instance/:uuid/kill", put(kill_instance))
         .route("/instance/:uuid/state", get(get_instance_state))
         .route("/instance/:uuid/player_count", get(get_player_count))
-        .route("/instance/:uuid/max_player_count", get(get_max_player_count))
+        .route(
+            "/instance/:uuid/max_player_count",
+            get(get_max_player_count),
+        )
         .route("/instance/:uuid/player_list", get(get_player_list))
         .route("/user/create", post(new_user))
         .route("/user/:user_id/delete", put(delete_user))
@@ -334,11 +356,12 @@ async fn main() {
         .route("/system/memory", get(get_ram))
         .route("/system/disk", get(get_disk))
         .route("/system/cpu", get(get_cpu_info))
+        .route("/check/port/:port", get(is_port_in_use))
+        .route("/check/name/:name", get(is_name_in_use))
         .route("/info", get(get_client_info))
         .layer(Extension(shared_state))
         .layer(cors);
     let app = Router::new().nest("/api/v1", api_routes);
-
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     select! {
         _ = event_buffer_task => info!("Event buffer task exited"),

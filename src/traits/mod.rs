@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use serde::Serialize;
 use serde_json::json;
 
+use self::t_manifest::TManifest;
 use self::{t_configurable::TConfigurable, t_macro::TMacro, t_player::TPlayerManagement, t_resource::TResourceManagement, t_server::TServer};
 
 pub mod t_server;
@@ -11,13 +12,14 @@ pub mod t_configurable;
 pub mod t_player;
 pub mod t_resource;
 pub mod t_macro;
+pub mod t_manifest;
 
 pub type MaybeUnsupported<T> = Option<T>;
 pub use core::option::Option::None as Unsupported;
 pub use core::option::Option::Some as Supported;
 
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub enum ErrorInner {
     // IO errors:
     FailedToReadFileOrDir,
@@ -80,7 +82,7 @@ pub enum ErrorInner {
     PermissionDenied,
     
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Error {
     pub inner : ErrorInner,
     pub detail : String
@@ -97,6 +99,6 @@ impl IntoResponse for Error {
     }
 }
 
-pub trait TInstance : TConfigurable + TMacro + TPlayerManagement + TResourceManagement + TServer + Sync + Send {
+pub trait TInstance : TConfigurable + TMacro + TPlayerManagement + TResourceManagement + TServer + TManifest + Sync + Send {
 
 }

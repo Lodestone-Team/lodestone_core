@@ -7,3 +7,6 @@ pub mod instance;
 pub mod users;
 mod util;
 pub mod client_info;
+pub mod checks;
+pub mod instance_setup_configs;
+pub mod instance_manifest;

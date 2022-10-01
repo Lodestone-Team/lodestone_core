@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 pub use std::path::PathBuf;
 
-pub use serde_json;
 pub use serde::{Deserialize, Serialize};
+pub use serde_json;
 use serde_json::Value;
 
 use crate::traits::{MaybeUnsupported, Unsupported};
@@ -36,17 +37,17 @@ pub trait TConfigurable {
     fn backup_period(&self) -> MaybeUnsupported<Option<u32>> {
         Unsupported
     }
-    fn get_flavours(&self) -> Vec<String> {
-        vec![]
-    }
     fn get_info(&self) -> Value;
 
     // setters
     fn set_name(&mut self, name: String) -> Result<(), crate::traits::Error>;
     fn set_description(&mut self, description: String) -> Result<(), crate::traits::Error>;
-    fn set_jvm_args(
+    fn set_port(&mut self, _port: u32) -> MaybeUnsupported<Result<(), crate::traits::Error>> {
+        Unsupported
+    }
+    fn set_cmd_argss(
         &mut self,
-        _jvm_args: Vec<String>,
+        _cmd_argss: Vec<String>,
     ) -> MaybeUnsupported<Result<(), crate::traits::Error>> {
         Unsupported
     }
@@ -97,5 +98,5 @@ pub trait TConfigurable {
     fn set_field(&mut self, field: &str, value: String) -> Result<(), super::Error>;
     fn get_field(&self, field: &str) -> Result<String, super::Error>;
 
-    fn setup_params(&self) -> serde_json::Value;
+    fn settings(&self) -> Result<HashMap<String, String>, super::Error>;
 }

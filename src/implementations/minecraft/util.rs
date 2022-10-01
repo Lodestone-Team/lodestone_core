@@ -1,8 +1,52 @@
-use std::str::FromStr;
+use std::{collections::HashMap, fs::File, io::BufRead, path::Path, str::FromStr};
 
 use serde_json;
 
+use crate::traits::{Error, ErrorInner};
+
 use super::Flavour;
+
+pub fn read_properties_from_path(path_to_properties: &Path) -> Result<HashMap<String, String>, Error> {
+    let properties_file = File::open(path_to_properties).map_err(|_| Error {
+        inner: ErrorInner::FailedToWriteFileOrDir,
+        detail: "Failed to open properties file. Has the instance been started at least once?"
+            .to_string(),
+    })?;
+    let buf_reader = std::io::BufReader::new(properties_file);
+    let stream = buf_reader
+        .lines()
+        .filter(Result::is_ok)
+        // this unwrap is safe because we filtered all the ok values
+        .map(Result::unwrap);
+
+    let mut ret = HashMap::new();
+
+    for line in stream {
+        // if a line starts with '#', it is a comment, skip it
+        if line.starts_with('#') {
+            continue;
+        }
+        // split the line into key and value
+        let mut split = line.split('=');
+        let key = split
+            .next()
+            .ok_or(Error {
+                inner: ErrorInner::MalformedFile,
+                detail: String::new(),
+            })?
+            .trim();
+        let value = split
+            .next()
+            .ok_or(Error {
+                inner: ErrorInner::MalformedFile,
+                detail: String::new(),
+            })?
+            .trim();
+
+        ret.insert(key.to_string(), value.to_string());
+    }
+    Ok(ret)
+}
 
 pub async fn get_vanilla_jar_url(version: &str) -> Option<String> {
     let client = reqwest::Client::new();

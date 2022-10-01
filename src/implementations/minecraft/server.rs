@@ -3,6 +3,7 @@ use std::process::{Command, Stdio};
 use std::{env, thread};
 
 use crate::events::{Event, EventInner};
+use crate::implementations::minecraft::util::read_properties_from_path;
 use crate::traits::t_configurable::TConfigurable;
 use crate::traits::t_server::{State, TServer};
 
@@ -10,23 +11,11 @@ use crate::traits::{Error, ErrorInner, MaybeUnsupported, Supported};
 
 use super::Instance;
 use log::{error, info, warn};
+use tokio::task;
 
 impl TServer for Instance {
     fn start(&mut self) -> Result<(), Error> {
-        self.state
-            .write()
-            .map_err(|e| {
-                error!(
-                    "[{}] Failed to aquired lock while getting state mutex: {}",
-                    self.name(),
-                    e
-                );
-                Error {
-                    inner: ErrorInner::FailedToAcquireLock,
-                    detail: "Failed to aquired lock while getting state mutex".to_string(),
-                }
-            })?
-            .update(State::Starting)?;
+        task::block_in_place(|| self.state.blocking_lock().update(State::Starting))?;
         let prelaunch = self.path().join("prelaunch.sh");
         if prelaunch.exists() {
             let _ = Command::new("bash")
@@ -55,18 +44,19 @@ impl TServer for Instance {
         let jre = self
             .path_to_runtimes
             .join("java")
-            .join(format!("jre{}", self.config.jre_major_version.unwrap()))
+            .join(format!("jre{}", self.config.jre_major_version))
             .join("bin")
             .join("java");
         match Command::new(&jre)
             .arg(format!("-Xmx{}M", self.config.max_ram))
             .arg(format!("-Xms{}M", self.config.min_ram))
-            .args(&self.config.jvm_args)
+            .args(&self.config.cmd_args)
             .arg("-jar")
             .arg(&self.path().join("server.jar"))
             .arg("nogui")
             .stdout(Stdio::piped())
             .stdin(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
         {
             Ok(mut proc) => {
@@ -105,7 +95,9 @@ impl TServer for Instance {
                     use lazy_static::lazy_static;
                     use std::collections::HashSet;
                     let event_broadcaster = self.event_broadcaster.clone();
+                    let settings = self.settings.clone();
                     let state = self.state.clone();
+                    let path_to_properties = self.path_to_properties.clone();
                     let uuid = self.uuid();
                     let name = self.name();
                     let players = self.players.clone();
@@ -115,7 +107,9 @@ impl TServer for Instance {
                                 static ref RE: Regex = Regex::new(r"\[.+\]+: (?!<)(.+)").unwrap();
                             }
                             if RE.is_match(msg).ok()? {
-                                RE.captures(msg).ok()?.map(|caps| caps.get(1).unwrap().as_str().to_string())
+                                RE.captures(msg)
+                                    .ok()?
+                                    .map(|caps| caps.get(1).unwrap().as_str().to_string())
                             } else {
                                 None
                             }
@@ -171,8 +165,7 @@ impl TServer for Instance {
 
                         fn parse_server_started(system_msg: &str) -> bool {
                             lazy_static! {
-                                static ref RE: Regex =
-                                    Regex::new(r#"Done \(.+\)! For help, type "help""#).unwrap();
+                                static ref RE: Regex = Regex::new(r#"Done \(.+\)!"#).unwrap();
                             }
                             RE.is_match(system_msg).unwrap()
                         }
@@ -190,89 +183,34 @@ impl TServer for Instance {
                                 None,
                             ));
 
+                            if parse_server_started(&line) && !did_start {
+                                did_start = true;
+                                state.blocking_lock().update(State::Running).expect("Failed to update state");
+                                *settings.blocking_lock() =
+                                    read_properties_from_path(&path_to_properties).expect("Failed to read properties");
+                            }
+                            let _ = event_broadcaster.send(Event::new(
+                                EventInner::SystemMessage(line.to_owned()),
+                                uuid.clone(),
+                                name.clone(),
+                                "".to_string(),
+                                None,
+                            ));
                             if let Some(system_msg) = parse_system_msg(&line) {
-                                if parse_server_started(&system_msg) && !did_start {
-                                    did_start = true;
-                                    let _ = state.write().map_err(|e| {
-                                        let err_msg = "Failed to aquired lock while getting state mutex";
-                                        error!(
-                                            "[{}] : {} {}",
-                                            name, err_msg, e
-                                        );
-                                        let _ = event_broadcaster.send(Event::new (
-                                            EventInner::InstanceError,
-                                            uuid.clone(),
-                                            name.clone(),
-                                            err_msg.to_string(),
-                                            None,
-                                    ));
-                                        Error {
-                                            inner: ErrorInner::FailedToAcquireLock,
-                                            detail: err_msg.to_string(),
-                                        }
-                                    }).map(|mut v| {v.update(State::Running).unwrap()});
-                                }
-                                let _ = event_broadcaster.send(Event::new(
-                                    EventInner::SystemMessage(system_msg.to_owned()),
-                                    uuid.clone(),
-                                    name.clone(),
-                                    "".to_string(),
-                                    None,
-                                ));
                                 if let Some(player_name) = parse_player_joined(&system_msg) {
-                                    let _ = players
-                                        .write()
-                                        .map_err(|e| {
-                                            let err_msg =
-                                                "Failed to aquired lock while getting state mutex";
-                                            error!("[{}] : {} {}", name, err_msg, e);
-                                            let _ = event_broadcaster.send(Event::new(
-                                                EventInner::InstanceError,
-                                                uuid.clone(),
-                                                name.clone(),
-                                                err_msg.to_string(),
-                                                None,
-                                            ));
-                                            Error {
-                                                inner: ErrorInner::FailedToAcquireLock,
-                                                detail: err_msg.to_string(),
-                                            }
-                                        })
-                                        .map(|mut v| {
-                                            v.transform_cmp(Box::new(
-                                                move |this: &mut HashSet<String>| {
-                                                    this.insert(player_name.clone());
-                                                    Ok(())
-                                                },
-                                            ))
-                                        });
+                                    let _ = players.blocking_lock().transform_cmp(Box::new(
+                                        move |this: &mut HashSet<String>| {
+                                            this.insert(player_name.clone());
+                                            Ok(())
+                                        },
+                                    ));
                                 } else if let Some(player_name) = parse_player_left(&system_msg) {
-                                    let _ = players
-                                        .write()
-                                        .map_err(|e| {
-                                            let err_msg =
-                                                "Failed to aquired lock while getting state mutex";
-                                            error!("[{}] : {} {}", name, err_msg, e);
-                                            let _ = event_broadcaster.send(Event::new(
-                                                EventInner::InstanceError,
-                                                uuid.clone(),
-                                                name.clone(),
-                                                err_msg.to_string(),
-                                                None,
-                                            ));
-                                            Error {
-                                                inner: ErrorInner::FailedToAcquireLock,
-                                                detail: err_msg.to_string(),
-                                            }
-                                        })
-                                        .map(|mut v| {
-                                            v.transform_cmp(Box::new(
-                                                move |this: &mut HashSet<String>| {
-                                                    this.remove(&player_name);
-                                                    Ok(())
-                                                },
-                                            ))
-                                        });
+                                    let _ = players.blocking_lock().transform_cmp(Box::new(
+                                        move |this: &mut HashSet<String>| {
+                                            this.remove(&player_name);
+                                            Ok(())
+                                        },
+                                    ));
                                 }
                             } else if let Some((player, msg)) = parse_player_msg(&line) {
                                 // debug!("[{}] Got a player message: <{}> {}", name, player, msg);
@@ -285,28 +223,7 @@ impl TServer for Instance {
                                 ));
                             }
                         }
-                        let _ = state
-                            .write()
-                            .map_err(|e| {
-                                error!(
-                                    "[{}] Failed to aquired lock while getting state mutex: {}",
-                                    name, e
-                                );
-                                let _ = event_broadcaster.send(Event::new(
-                                    EventInner::InstanceError,
-                                    uuid.clone(),
-                                    name.clone(),
-                                    "Failed to aquired lock while getting state mutex".to_string(),
-                                    None,
-                                ));
-                                Error {
-                                    inner: ErrorInner::FailedToAcquireLock,
-                                    detail: "Failed to aquired lock while getting state mutex"
-                                        .to_string(),
-                                }
-                            })
-                            .unwrap()
-                            .update(State::Stopped);
+                        let _ = state.blocking_lock().update(State::Stopped);
                     }
                 });
             }
@@ -314,23 +231,12 @@ impl TServer for Instance {
                 env::set_current_dir("../..").unwrap();
             }
         }
+        self.config.has_started = true;
+        self.write_config_to_file()?;
         Ok(())
     }
     fn stop(&mut self) -> Result<(), Error> {
-        self.state
-            .write()
-            .map_err(|e| {
-                error!(
-                    "[{}] Failed to aquired lock while getting state mutex: {}",
-                    self.name(),
-                    e
-                );
-                Error {
-                    inner: ErrorInner::FailedToAcquireLock,
-                    detail: "Failed to aquired lock while getting state mutex".to_string(),
-                }
-            })?
-            .update(State::Stopping)?;
+        task::block_in_place(|| self.state.blocking_lock().update(State::Stopping))?;
         let name = self.name();
         let uuid = self.uuid();
         self.process
@@ -427,7 +333,7 @@ impl TServer for Instance {
     }
 
     fn state(&self) -> State {
-        self.state.read().unwrap().get()
+        task::block_in_place(|| self.state.blocking_lock().get())
     }
 
     fn send_command(&mut self, command: &str) -> MaybeUnsupported<Result<(), Error>> {
@@ -438,12 +344,20 @@ impl TServer for Instance {
             })
         } else {
             match self.process.as_mut() {
-                Some(proc) => match proc
-                    .stdin
-                    .as_mut()
-                    .unwrap()
-                    .write_all(format!("{}\n", command).as_bytes())
-                {
+                Some(proc) => match {
+                    if command == "stop" {
+                        task::block_in_place(|| {
+                            self.state
+                                .blocking_lock()
+                                .update(State::Stopping)
+                                .expect("Failed to update state")
+                        });
+                    }
+                    proc.stdin
+                        .as_mut()
+                        .unwrap()
+                        .write_all(format!("{}\n", command).as_bytes())
+                } {
                     Ok(_) => Ok(()),
                     Err(e) => {
                         let _ = self.event_broadcaster.send(Event::new(
