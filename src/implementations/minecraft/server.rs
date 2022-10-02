@@ -1,6 +1,7 @@
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
-use std::{env, thread};
+use std::env;
+use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt};
+use std::process::Stdio;
+use tokio::process::Command;
 
 use crate::events::{Event, EventInner};
 use crate::implementations::minecraft::util::read_properties_from_path;
@@ -13,30 +14,35 @@ use super::Instance;
 use log::{error, info, warn};
 use tokio::task;
 
+#[async_trait::async_trait]
 impl TServer for Instance {
-    fn start(&mut self) -> Result<(), Error> {
-        task::block_in_place(|| self.state.blocking_lock().update(State::Starting))?;
-        let prelaunch = self.path().join("prelaunch.sh");
+    async fn start(&mut self) -> Result<(), Error> {
+        self.state.lock().await.update(State::Starting)?;
+        let prelaunch = self.path().await.join("prelaunch.sh");
         if prelaunch.exists() {
             let _ = Command::new("bash")
-                .arg(&self.path().join("prelaunch.sh"))
+                .arg(&self.path().await.join("prelaunch.sh"))
                 .output()
+                .await
                 .map_err(|e| {
                     error!(
                         "[{}] Failed to run prelaunch script: {}",
-                        self.name(),
+                        self.config.name.clone(),
                         e.to_string()
                     );
                     let _ = self.event_broadcaster.send(Event::new(
                         EventInner::InstanceError,
-                        self.uuid(),
-                        self.name(),
+                        self.config.uuid.clone(),
+                        self.config.name.clone(),
                         format!("Failed to run prelaunch script: {}", e),
                         None,
                     ));
                 });
         } else {
-            info!("[{}] No prelaunch script found, skipping", self.name());
+            info!(
+                "[{}] No prelaunch script found, skipping",
+                self.config.name.clone()
+            );
         }
 
         env::set_current_dir(&self.config.path).unwrap();
@@ -52,7 +58,7 @@ impl TServer for Instance {
             .arg(format!("-Xms{}M", self.config.min_ram))
             .args(&self.config.cmd_args)
             .arg("-jar")
-            .arg(&self.path().join("server.jar"))
+            .arg(&self.config.path.join("server.jar"))
             .arg("nogui")
             .stdout(Stdio::piped())
             .stdin(Stdio::piped())
@@ -62,11 +68,14 @@ impl TServer for Instance {
             Ok(mut proc) => {
                 env::set_current_dir("../..").unwrap();
                 proc.stdin.as_mut().ok_or_else(|| {
-                    error!("[{}] Failed to take stdin during startup", self.name());
+                    error!(
+                        "[{}] Failed to take stdin during startup",
+                        self.config.name.clone()
+                    );
                     let _ = self.event_broadcaster.send(Event::new(
                         EventInner::InstanceError,
-                        self.uuid(),
-                        self.name(),
+                        self.config.uuid.clone(),
+                        self.config.name.clone(),
                         "Failed to take stdin during startup".to_string(),
                         None,
                     ));
@@ -76,11 +85,14 @@ impl TServer for Instance {
                     }
                 })?;
                 let stdout = proc.stdout.take().ok_or_else(|| {
-                    error!("[{}] Failed to take stdout during startup", self.name());
+                    error!(
+                        "[{}] Failed to take stdout during startup",
+                        self.config.name.clone()
+                    );
                     let _ = self.event_broadcaster.send(Event::new(
                         EventInner::InstanceError,
-                        self.uuid(),
-                        self.name(),
+                        self.config.uuid.clone(),
+                        self.config.name.clone(),
                         "Failed to take stdout during startup".to_string(),
                         None,
                     ));
@@ -90,7 +102,7 @@ impl TServer for Instance {
                     }
                 })?;
                 self.process = Some(proc);
-                thread::spawn({
+                task::spawn({
                     use fancy_regex::Regex;
                     use lazy_static::lazy_static;
                     use std::collections::HashSet;
@@ -98,10 +110,10 @@ impl TServer for Instance {
                     let settings = self.settings.clone();
                     let state = self.state.clone();
                     let path_to_properties = self.path_to_properties.clone();
-                    let uuid = self.uuid();
-                    let name = self.name();
+                    let uuid = self.config.uuid.clone();
+                    let name = self.config.name.clone();
                     let players = self.players.clone();
-                    move || {
+                    async move {
                         fn parse_system_msg(msg: &str) -> Option<String> {
                             lazy_static! {
                                 static ref RE: Regex = Regex::new(r"\[.+\]+: (?!<)(.+)").unwrap();
@@ -172,8 +184,8 @@ impl TServer for Instance {
 
                         let mut did_start = false;
 
-                        let reader = BufReader::new(stdout);
-                        for line in reader.lines().filter(|x| x.is_ok()).map(|x| x.unwrap()) {
+                        let mut lines = BufReader::new(stdout).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
                             info!("[{}] {}", name, line);
                             let _ = event_broadcaster.send(Event::new(
                                 EventInner::InstanceOutput(line.clone()),
@@ -185,9 +197,14 @@ impl TServer for Instance {
 
                             if parse_server_started(&line) && !did_start {
                                 did_start = true;
-                                state.blocking_lock().update(State::Running).expect("Failed to update state");
-                                *settings.blocking_lock() =
-                                    read_properties_from_path(&path_to_properties).expect("Failed to read properties");
+                                state
+                                    .lock()
+                                    .await
+                                    .update(State::Running)
+                                    .expect("Failed to update state");
+                                *settings.lock().await =
+                                    read_properties_from_path(&path_to_properties)
+                                        .expect("Failed to read properties");
                             }
                             let _ = event_broadcaster.send(Event::new(
                                 EventInner::SystemMessage(line.to_owned()),
@@ -198,14 +215,14 @@ impl TServer for Instance {
                             ));
                             if let Some(system_msg) = parse_system_msg(&line) {
                                 if let Some(player_name) = parse_player_joined(&system_msg) {
-                                    let _ = players.blocking_lock().transform_cmp(Box::new(
+                                    let _ = players.lock().await.transform_cmp(Box::new(
                                         move |this: &mut HashSet<String>| {
                                             this.insert(player_name.clone());
                                             Ok(())
                                         },
                                     ));
                                 } else if let Some(player_name) = parse_player_left(&system_msg) {
-                                    let _ = players.blocking_lock().transform_cmp(Box::new(
+                                    let _ = players.lock().await.transform_cmp(Box::new(
                                         move |this: &mut HashSet<String>| {
                                             this.remove(&player_name);
                                             Ok(())
@@ -223,7 +240,7 @@ impl TServer for Instance {
                                 ));
                             }
                         }
-                        let _ = state.blocking_lock().update(State::Stopped);
+                        let _ = state.lock().await.update(State::Stopped);
                     }
                 });
             }
@@ -232,13 +249,13 @@ impl TServer for Instance {
             }
         }
         self.config.has_started = true;
-        self.write_config_to_file()?;
+        self.write_config_to_file().await?;
         Ok(())
     }
-    fn stop(&mut self) -> Result<(), Error> {
-        task::block_in_place(|| self.state.blocking_lock().update(State::Stopping))?;
-        let name = self.name();
-        let uuid = self.uuid();
+    async fn stop(&mut self) -> Result<(), Error> {
+        self.state.lock().await.update(State::Stopping)?;
+        let name = self.config.name.clone();
+        let uuid = self.config.uuid.clone();
         self.process
             .as_mut()
             .ok_or_else(|| {
@@ -271,17 +288,17 @@ impl TServer for Instance {
                     detail: "Failed to stop instance: stdin not available".to_string(),
                 }
             })?
-            .write_all(b"stop\n")
+            .write_all(b"stop\n").await
             .map_err(|e| {
                 error!(
                     "[{}] Failed to write to stdin: {}",
-                    self.name(),
+                    self.config.name.clone(),
                     e.to_string()
                 );
                 let _ = self.event_broadcaster.send(Event::new(
                     EventInner::InstanceError,
-                    self.uuid(),
-                    self.name(),
+                    self.config.uuid.clone(),
+                    self.config.name.clone(),
                     format!("Failed to write to stdin: {}", e),
                     None,
                 ));
@@ -292,9 +309,9 @@ impl TServer for Instance {
             })?;
         Ok(())
     }
-    fn kill(&mut self) -> Result<(), crate::traits::Error> {
-        if self.state() == State::Stopped {
-            warn!("[{}] Instance is already stopped", self.name());
+    async fn kill(&mut self) -> Result<(), crate::traits::Error> {
+        if self.state().await == State::Stopped {
+            warn!("[{}] Instance is already stopped", self.config.name.clone());
             return Err(Error {
                 inner: ErrorInner::InstanceStopped,
                 detail: "Instance is already stopped".to_string(),
@@ -305,23 +322,23 @@ impl TServer for Instance {
             .ok_or_else(|| {
                 error!(
                     "[{}] Failed to kill instance: stdin not open",
-                    self.config.name
+                    self.config.name.clone()
                 );
                 Error {
                     inner: ErrorInner::StdinNotOpen,
                     detail: "Failed to kill instance: stdin not open".to_string(),
                 }
             })?
-            .kill()
+            .kill().await
             .map_err(|_| {
                 error!(
                     "[{}] Failed to kill instance, instance already existed",
-                    self.name()
+                    self.config.name.clone()
                 );
                 let _ = self.event_broadcaster.send(Event::new(
                     EventInner::InstanceError,
-                    self.uuid(),
-                    self.name(),
+                    self.config.uuid.clone(),
+                    self.config.name.clone(),
                     "Failed to kill instance, instance already existed".to_string(),
                     None,
                 ));
@@ -332,12 +349,12 @@ impl TServer for Instance {
             })
     }
 
-    fn state(&self) -> State {
-        task::block_in_place(|| self.state.blocking_lock().get())
+    async fn state(&self) -> State {
+        self.state.lock().await.get()
     }
 
-    fn send_command(&mut self, command: &str) -> MaybeUnsupported<Result<(), Error>> {
-        Supported(if self.state() == State::Stopped {
+    async fn send_command(&mut self, command: &str) -> MaybeUnsupported<Result<(), Error>> {
+        Supported(if self.state().await == State::Stopped {
             Err(Error {
                 inner: ErrorInner::InstanceStopped,
                 detail: "Instance not running".to_string(),
@@ -346,30 +363,29 @@ impl TServer for Instance {
             match self.process.as_mut() {
                 Some(proc) => match {
                     if command == "stop" {
-                        task::block_in_place(|| {
-                            self.state
-                                .blocking_lock()
-                                .update(State::Stopping)
-                                .expect("Failed to update state")
-                        });
+                        self.state
+                            .lock()
+                            .await
+                            .update(State::Stopping)
+                            .expect("Failed to update state")
                     }
                     proc.stdin
                         .as_mut()
                         .unwrap()
-                        .write_all(format!("{}\n", command).as_bytes())
+                        .write_all(format!("{}\n", command).as_bytes()).await
                 } {
                     Ok(_) => Ok(()),
                     Err(e) => {
                         let _ = self.event_broadcaster.send(Event::new(
                             EventInner::InstanceWarning,
-                            self.uuid(),
-                            self.name(),
+                            self.config.uuid.clone(),
+                            self.config.name.clone(),
                             format!("Failed to send command to instance: {}", e),
                             None,
                         ));
                         warn!(
                             "[{}] Failed to send command to instance: {}",
-                            self.name(),
+                            self.config.name.clone(),
                             e
                         );
                         Err(Error {
@@ -383,12 +399,12 @@ impl TServer for Instance {
                         "Failed to write to stdin because stdin is None. Please report this bug.";
                     let _ = self.event_broadcaster.send(Event::new(
                         EventInner::InstanceError,
-                        self.uuid(),
-                        self.name(),
+                        self.config.uuid.clone(),
+                        self.config.name.clone(),
                         err_msg.to_string(),
                         None,
                     ));
-                    error!("[{}] {}", self.name(), err_msg);
+                    error!("[{}] {}", self.config.name.clone(), err_msg);
                     Err(Error {
                         inner: ErrorInner::StdinNotOpen,
                         detail: err_msg.to_string(),

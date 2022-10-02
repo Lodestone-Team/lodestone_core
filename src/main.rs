@@ -81,13 +81,14 @@ pub struct AppState {
     port_allocator: Arc<Mutex<PortAllocator>>,
 }
 
-fn restore_instances(
+async fn restore_instances(
     lodestone_path: &Path,
     event_broadcaster: &Sender<Event>,
 ) -> HashMap<String, Arc<Mutex<dyn TInstance>>> {
     let mut ret: HashMap<String, Arc<Mutex<dyn TInstance>>> = HashMap::new();
 
-    list_dir(&lodestone_path.join("instances"), Some(true))
+    for instance in list_dir(&lodestone_path.join("instances"), Some(true))
+        .await
         .unwrap()
         .iter()
         .filter(|path| {
@@ -122,29 +123,40 @@ fn restore_instances(
                 _ => unimplemented!(),
             }
         })
-        .for_each(|instance| {
-            ret.insert(instance.uuid(), Arc::new(Mutex::new(instance)));
-        });
+    {
+        ret.insert(
+            instance.uuid().await.to_string(),
+            Arc::new(Mutex::new(instance)),
+        );
+    }
     ret
 }
 
-fn restore_users(path_to_user_json: &Path) -> HashMap<String, User> {
+async fn restore_users(path_to_user_json: &Path) -> HashMap<String, User> {
     // create user file if it doesn't exist
-    if std::fs::OpenOptions::new()
+    if tokio::fs::OpenOptions::new()
         .read(true)
         .create(true)
         .write(true)
         .open(path_to_user_json)
+        .await
         .unwrap()
         .metadata()
+        .await
         .unwrap()
         .len()
         == 0
     {
         return HashMap::new();
     }
-    let users: HashMap<String, User> =
-        serde_json::from_reader(std::fs::File::open(path_to_user_json).unwrap()).unwrap();
+    let users: HashMap<String, User> = serde_json::from_reader(
+        tokio::fs::File::open(path_to_user_json)
+            .await
+            .unwrap()
+            .into_std()
+            .await,
+    )
+    .unwrap();
     users
 }
 
@@ -170,7 +182,7 @@ async fn main() {
     let (tx, _rx): (Sender<Event>, Receiver<Event>) = broadcast::channel(128);
 
     let mut stateful_users = Stateful::new(
-        restore_users(&dot_lodestone_path.join("users")),
+        restore_users(&dot_lodestone_path.join("users")).await,
         {
             let dot_lodestone_path = dot_lodestone_path.clone();
             Box::new(move |users, _| {
@@ -245,11 +257,11 @@ async fn main() {
         info!("Username: owner");
         info!("Password: {}", owner_psw);
     }
-    let instances = restore_instances(&lodestone_path, &tx);
+    let instances = restore_instances(&lodestone_path, &tx).await;
     let mut allocated_ports = HashSet::new();
     for (_, instance) in instances.iter() {
         let instance = instance.lock().await;
-        allocated_ports.insert(instance.port());
+        allocated_ports.insert(instance.port().await);
     }
     let shared_state = AppState {
         instances: Arc::new(Mutex::new(instances)),

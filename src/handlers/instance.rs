@@ -50,16 +50,16 @@ pub async fn list_instance(
                 let instance = instance.lock().await;
 
                 InstanceListInfo {
-                    uuid: instance.uuid(),
-                    name: instance.name(),
-                    port: instance.port(),
-                    description: instance.description(),
-                    game_type: instance.game_type(),
-                    flavour: instance.flavour(),
-                    state: instance.state(),
-                    player_count: instance.get_player_count().unwrap_or(0),
-                    max_player_count: instance.get_max_player_count().unwrap_or(0),
-                    creation_time: instance.creation_time(),
+                    uuid: instance.uuid().await,
+                    name: instance.name().await,
+                    port: instance.port().await,
+                    description: instance.description().await,
+                    game_type: instance.game_type().await,
+                    flavour: instance.flavour().await,
+                    state: instance.state().await,
+                    player_count: instance.get_player_count().await.unwrap_or(0),
+                    max_player_count: instance.get_max_player_count().await.unwrap_or(0),
+                    creation_time: instance.creation_time().await,
                 }
             }),
     )
@@ -138,7 +138,7 @@ pub async fn create_minecraft_instance(
     }
     for (_, instance) in state.instances.lock().await.iter() {
         let instance = instance.lock().await;
-        if instance.name() == name {
+        if instance.name().await == name {
             return Err(Error {
                 inner: ErrorInner::MalformedRequest,
                 detail: "Instance with name already exists".to_string(),
@@ -186,13 +186,13 @@ pub async fn remove_instance(
     let mut instances = state.instances.lock().await;
     if let Some(instance) = instances.get(&uuid) {
         let instance_lock = instance.lock().await;
-        if !(instance_lock.state() == State::Stopped) {
+        if !(instance_lock.state().await == State::Stopped) {
             Err(Error {
                 inner: ErrorInner::InstanceStarted,
                 detail: "Instance is running, cannot remove".to_string(),
             })
         } else {
-            tokio::fs::remove_dir_all(instance_lock.path())
+            tokio::fs::remove_dir_all(instance_lock.path().await)
                 .await
                 .map_err(|e| Error {
                     inner: ErrorInner::FailedToRemoveFileOrDir,
@@ -203,7 +203,7 @@ pub async fn remove_instance(
                 .port_allocator
                 .lock()
                 .await
-                .deallocate(instance_lock.port());
+                .deallocate(instance_lock.port().await);
             drop(instance_lock);
             instances.remove(&uuid);
             Ok(Json(json!("OK")))
@@ -243,7 +243,7 @@ pub async fn start_instance(
         })?
         .lock()
         .await
-        .start()?;
+        .start().await?;
     Ok(Json(json!("ok")))
 }
 
@@ -262,7 +262,7 @@ pub async fn stop_instance(
         })?
         .lock()
         .await
-        .stop()?;
+        .stop().await?;
     Ok(Json(json!("ok")))
 }
 
@@ -281,7 +281,7 @@ pub async fn kill_instance(
         })?
         .lock()
         .await
-        .kill()?;
+        .kill().await?;
     Ok(Json(json!("ok")))
 }
 
@@ -306,7 +306,7 @@ pub async fn send_command(
         })?
         .lock()
         .await
-        .send_command(&query.command)
+        .send_command(&query.command).await
     {
         Supported(v) => v.map(|_| Json(json!("ok"))),
         Unsupported => Err(Error {
@@ -331,7 +331,7 @@ pub async fn get_instance_state(
         })?
         .lock()
         .await
-        .state())))
+        .state().await)))
 }
 
 pub async fn get_player_count(
@@ -349,7 +349,7 @@ pub async fn get_player_count(
         })?
         .lock()
         .await
-        .get_player_count()
+        .get_player_count().await
     {
         Supported(v) => Ok(Json(v)),
         Unsupported => Err(Error {
@@ -374,7 +374,7 @@ pub async fn get_max_player_count(
         })?
         .lock()
         .await
-        .get_max_player_count()
+        .get_max_player_count().await
     {
         Supported(v) => Ok(Json(v)),
         Unsupported => Err(Error {
@@ -399,7 +399,7 @@ pub async fn get_player_list(
         })?
         .lock()
         .await
-        .get_player_list()
+        .get_player_list().await
     {
         Supported(v) => Ok(Json(v)),
         Unsupported => Err(Error {

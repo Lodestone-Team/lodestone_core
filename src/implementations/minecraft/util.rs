@@ -4,9 +4,9 @@ use serde_json;
 
 use crate::traits::{Error, ErrorInner};
 
-use super::Flavour;
-
-pub fn read_properties_from_path(path_to_properties: &Path) -> Result<HashMap<String, String>, Error> {
+pub fn read_properties_from_path(
+    path_to_properties: &Path,
+) -> Result<HashMap<String, String>, Error> {
     let properties_file = File::open(path_to_properties).map_err(|_| Error {
         inner: ErrorInner::FailedToWriteFileOrDir,
         detail: "Failed to open properties file. Has the instance been started at least once?"
@@ -277,15 +277,6 @@ pub async fn get_jre_url(version: &str) -> Option<(String, u64)> {
         ),
         major_java_version,
     ))
-}
-
-pub async fn get_list_of_versions(flavour: Flavour) -> Vec<String> {
-    match flavour {
-        Flavour::Vanilla => todo!(),
-        Flavour::Fabric => todo!(),
-        Flavour::Paper => todo!(),
-        Flavour::Spigot => unimplemented!(),
-    }
 }
 
 mod tests {
