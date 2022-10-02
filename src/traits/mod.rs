@@ -47,6 +47,7 @@ pub enum ErrorInner {
     InstanceStopping,
     InstanceErrored,
     InstanceNotFound,
+    PortInUse,
 
     // Config file errors:
     MalformedFile,
