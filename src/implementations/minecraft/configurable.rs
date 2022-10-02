@@ -3,7 +3,6 @@ use std::{collections::HashMap, sync::atomic};
 use async_trait::async_trait;
 use serde_json::json;
 
-
 use crate::traits::{self, t_configurable::TConfigurable, ErrorInner, MaybeUnsupported, Supported};
 
 use crate::traits::Error;
@@ -99,7 +98,9 @@ impl TConfigurable for Instance {
     async fn set_port(&mut self, port: u32) -> MaybeUnsupported<Result<(), traits::Error>> {
         Supported({
             self.config.port = port;
-            self.write_config_to_file().await
+            self.write_config_to_file()
+                .await
+                .and(self.write_properties_to_file().await)
         })
     }
 
@@ -107,83 +108,92 @@ impl TConfigurable for Instance {
         &mut self,
         cmd_args: Vec<String>,
     ) -> MaybeUnsupported<Result<(), traits::Error>> {
-        self.config.cmd_args = cmd_args;
-        self.write_config_to_file().await
-            .map_or_else(|e| Supported(Err(e)), |_| Supported(Ok(())))
+        Supported({
+            self.config.cmd_args = cmd_args;
+            self.write_config_to_file().await
+        })
     }
 
     async fn set_min_ram(&mut self, min_ram: u32) -> MaybeUnsupported<Result<(), traits::Error>> {
-        self.config.min_ram = min_ram;
-        self.write_config_to_file().await
-            .map_or_else(|e| Supported(Err(e)), |_| Supported(Ok(())))
+        Supported({
+            self.config.min_ram = min_ram;
+            self.write_config_to_file().await
+        })
     }
 
     async fn set_max_ram(&mut self, max_ram: u32) -> MaybeUnsupported<Result<(), traits::Error>> {
-        self.config.min_ram = max_ram;
-        self.write_config_to_file().await
-            .map_or_else(|e| Supported(Err(e)), |_| Supported(Ok(())))
+        Supported({
+            self.config.max_ram = max_ram;
+            self.write_config_to_file().await
+        })
     }
 
     async fn set_auto_start(
         &mut self,
         auto_start: bool,
     ) -> MaybeUnsupported<Result<(), traits::Error>> {
-        self.config.auto_start = auto_start;
-        self.auto_start.store(auto_start, atomic::Ordering::Relaxed);
-        self.write_config_to_file().await
-            .map_or_else(|e| Supported(Err(e)), |_| Supported(Ok(())))
+        Supported({
+            self.config.auto_start = auto_start;
+            self.auto_start.store(auto_start, atomic::Ordering::Relaxed);
+            self.write_config_to_file().await
+        })
     }
 
     async fn set_restart_on_crash(
         &mut self,
         restart_on_crash: bool,
     ) -> MaybeUnsupported<Result<(), traits::Error>> {
-        self.config.restart_on_crash = restart_on_crash;
-        self.auto_start
-            .store(restart_on_crash, atomic::Ordering::Relaxed);
-        self.write_config_to_file().await
-            .map_or_else(|e| Supported(Err(e)), |_| Supported(Ok(())))
+        Supported({
+            self.config.restart_on_crash = restart_on_crash;
+            self.auto_start
+                .store(restart_on_crash, atomic::Ordering::Relaxed);
+            self.write_config_to_file().await
+        })
     }
 
     async fn set_timeout_last_left(
         &mut self,
         timeout_last_left: Option<u32>,
     ) -> MaybeUnsupported<Result<(), traits::Error>> {
-        *self.timeout_last_left.lock().await = timeout_last_left;
-        self.config.timeout_last_left = timeout_last_left;
-        self.write_config_to_file().await
-            .map_or_else(|e| Supported(Err(e)), |_| Supported(Ok(())))
+        Supported({
+            self.config.timeout_last_left = timeout_last_left;
+            *self.timeout_last_left.lock().await = timeout_last_left;
+            self.write_config_to_file().await
+        })
     }
 
     async fn set_timeout_no_activity(
         &mut self,
         timeout_no_activity: Option<u32>,
     ) -> MaybeUnsupported<Result<(), traits::Error>> {
-        *self.timeout_no_activity.lock().await = timeout_no_activity;
-        self.config.timeout_no_activity = timeout_no_activity;
-        self.write_config_to_file().await
-            .map_or_else(|e| Supported(Err(e)), |_| Supported(Ok(())))
+        Supported({
+            *self.timeout_no_activity.lock().await = timeout_no_activity;
+            self.config.timeout_no_activity = timeout_no_activity;
+            self.write_config_to_file().await
+        })
     }
 
     async fn set_start_on_connection(
         &mut self,
         start_on_connection: bool,
     ) -> MaybeUnsupported<Result<(), traits::Error>> {
-        self.config.start_on_connection = start_on_connection;
-        self.auto_start
-            .store(start_on_connection, atomic::Ordering::Relaxed);
-        self.write_config_to_file().await
-            .map_or_else(|e| Supported(Err(e)), |_| Supported(Ok(())))
+        Supported({
+            self.config.start_on_connection = start_on_connection;
+            self.auto_start
+                .store(start_on_connection, atomic::Ordering::Relaxed);
+            self.write_config_to_file().await
+        })
     }
 
     async fn set_backup_period(
         &mut self,
         backup_period: Option<u32>,
     ) -> MaybeUnsupported<Result<(), traits::Error>> {
-        *self.backup_period.lock().await = backup_period;
-        self.config.timeout_no_activity = backup_period;
-        self.write_config_to_file().await
-            .map_or_else(|e| Supported(Err(e)), |_| Supported(Ok(())))
+        Supported({
+            *self.backup_period.lock().await = backup_period;
+            self.config.timeout_no_activity = backup_period;
+            self.write_config_to_file().await
+        })
     }
 
     async fn set_field(&mut self, field: &str, value: String) -> Result<(), Error> {
