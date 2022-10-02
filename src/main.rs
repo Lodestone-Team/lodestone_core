@@ -20,9 +20,9 @@ use crate::{
             update_permissions,
         },
     },
-    prelude::LODESTONE_PATH,
+    prelude::{LODESTONE_PATH, PATH_TO_BINARIES, PATH_TO_STORES},
     traits::Error,
-    util::rand_alphanumeric,
+    util::{download_file, rand_alphanumeric},
 };
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use axum::{
@@ -43,10 +43,11 @@ use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
     path::Path,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::AtomicBool, Arc}, time::Duration,
 };
 use tokio::{
     fs::create_dir_all,
+    process::Command,
     select,
     sync::{
         broadcast::{self, Receiver, Sender},
@@ -160,6 +161,45 @@ async fn restore_users(path_to_user_json: &Path) -> HashMap<String, User> {
     users
 }
 
+async fn download_dependencies() -> Result<(), Error> {
+    let arch = if std::env::consts::ARCH == "x86_64" {
+        "x64"
+    } else {
+        std::env::consts::ARCH
+    };
+
+    let os = std::env::consts::OS;
+    let _7zip_name = format!("7z_{}_{}", os, arch);
+    let path_to_7z = PATH_TO_BINARIES.with(|v| v.join("7zip"));
+    // check if 7z is already downloaded
+    if !path_to_7z.join(&_7zip_name).exists() {
+        info!("Downloading 7z");
+        let _7z = download_file(
+            format!(
+                "https://github.com/Lodestone-Team/dependencies/raw/main/7z_{}_{}",
+                os, arch
+            )
+            .as_str(),
+            path_to_7z.as_ref(),
+            Some(_7zip_name.as_str()),
+            &|_| {},
+            false,
+        )
+        .await?;
+    } else {
+        info!("7z already downloaded");
+    }
+    if os != "windows" {
+        Command::new("chmod")
+            .arg("+x")
+            .arg(path_to_7z.join(&_7zip_name))
+            .output()
+            .await
+            .unwrap();
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     env_logger::builder()
@@ -169,25 +209,33 @@ async fn main() {
         .format_target(false)
         .init();
     let lodestone_path = LODESTONE_PATH.with(|path| path.clone());
+    create_dir_all(&lodestone_path).await.unwrap();
     std::env::set_current_dir(&lodestone_path).expect("Failed to set current dir");
 
+    create_dir_all(PATH_TO_BINARIES.with(|path| path.clone()))
+        .await
+        .unwrap();
+
+    create_dir_all(PATH_TO_STORES.with(|path| path.clone()))
+        .await
+        .unwrap();
+
     let web_path = lodestone_path.join("web");
-    let dot_lodestone_path = lodestone_path.join(".lodestone");
     let path_to_intances = lodestone_path.join("instances");
-    create_dir_all(&dot_lodestone_path).await.unwrap();
     create_dir_all(&web_path).await.unwrap();
     create_dir_all(&path_to_intances).await.unwrap();
     info!("Lodestone path: {}", lodestone_path.display());
 
+    download_dependencies().await.unwrap();
+
     let (tx, _rx): (Sender<Event>, Receiver<Event>) = broadcast::channel(128);
 
     let mut stateful_users = Stateful::new(
-        restore_users(&dot_lodestone_path.join("users")).await,
+        restore_users(&PATH_TO_STORES.with(|v| v.join("users"))).await,
         {
-            let dot_lodestone_path = dot_lodestone_path.clone();
             Box::new(move |users, _| {
                 serde_json::to_writer(
-                    std::fs::File::create(&dot_lodestone_path.join("users")).unwrap(),
+                    std::fs::File::create(&PATH_TO_STORES.with(|v| v.join("users"))).unwrap(),
                     users,
                 )
                 .unwrap();
@@ -195,10 +243,9 @@ async fn main() {
             })
         },
         {
-            let dot_lodestone_path = dot_lodestone_path.clone();
             Box::new(move |users, _| {
                 serde_json::to_writer(
-                    std::fs::File::create(&dot_lodestone_path.join("users")).unwrap(),
+                    std::fs::File::create(&PATH_TO_STORES.with(|v| v.join("users"))).unwrap(),
                     users,
                 )
                 .unwrap();
@@ -371,6 +418,7 @@ async fn main() {
         .route("/check/port/:port", get(is_port_in_use))
         .route("/check/name/:name", get(is_name_in_use))
         .route("/info", get(get_client_info))
+        .route("/test", get(test))
         .layer(Extension(shared_state))
         .layer(cors);
     let app = Router::new().nest("/api/v1", api_routes);
@@ -380,4 +428,14 @@ async fn main() {
         _ = axum::Server::bind(&addr)
         .serve(app.into_make_service()) => info!("Server exited"),
     }
+}
+
+async fn test() -> String {
+    tokio::task::spawn(async{
+        loop {
+            tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_secs(1))).await;
+            println!("test");
+        }
+    });
+    "test".to_string()
 }
