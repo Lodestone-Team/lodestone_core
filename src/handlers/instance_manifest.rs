@@ -21,6 +21,6 @@ pub async fn get_instance_manifest(
             })?
             .lock()
             .await
-            .get_manifest(),
+            .get_manifest().await,
     ))
 }

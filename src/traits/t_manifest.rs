@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 #[derive(Hash, Eq, PartialEq, Serialize, Deserialize, Debug)]
@@ -66,6 +67,7 @@ pub struct Manifest {
     pub settings: HashSet<String>,
 }
 
+#[async_trait]
 pub trait TManifest {
-    fn get_manifest(&self) -> Manifest;
+    async fn get_manifest(&self) -> Manifest;
 }

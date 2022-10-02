@@ -1,11 +1,11 @@
 use std::collections::HashSet;
-use std::fs::File;
+use tokio::fs::File;
 
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
-use std::io::Write;
+use tokio::io::AsyncWriteExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use tokio::process::Command;
 use tokio::fs::remove_file;
 
 use futures_util::StreamExt;
@@ -47,7 +47,7 @@ pub async fn download_file(
         inner: ErrorInner::FailedToUpload,
         detail: format!("Failed to send GET request to {}", url),
     })?;
-    std::fs::create_dir_all(path).map_err(|_| Error {
+    tokio::fs::create_dir_all(path).await.map_err(|_| Error {
         inner: ErrorInner::FailedToUpload,
         detail: format!("Failed to create directory {}", path.display()),
     })?;
@@ -75,7 +75,7 @@ pub async fn download_file(
             .unwrap_or("unknown")
             .replace('\"', "");
     }
-    if overwrite_old && path.join(&file_name).exists() {
+    if !overwrite_old && path.join(&file_name).exists() {
         return Err(Error {
             inner: ErrorInner::FiledOrDirAlreadyExists,
             detail: format!("{} already exists", path.join(&file_name).display()),
@@ -89,7 +89,7 @@ pub async fn download_file(
         .progress_chars("#>-"));
     pb.set_message(&format!("Downloading {}", url));
 
-    let mut downloaded_file = File::create(path.join(&file_name)).map_err(|_| Error {
+    let mut downloaded_file = File::create(path.join(&file_name)).await.map_err(|_| Error {
         inner: ErrorInner::FailedToWriteFileOrDir,
         detail: format!("Failed to create file {}", path.join(&file_name).display()),
     })?;
@@ -98,7 +98,7 @@ pub async fn download_file(
     while let Some(item) = stream.next().await {
         let chunk = item.expect("Error while downloading file");
         downloaded_file
-            .write_all(&chunk)
+            .write_all(&chunk).await
             .expect("Error while writing to file");
         downloaded += chunk.len() as u64;
         on_download(DownloadProgress {
@@ -113,27 +113,46 @@ pub async fn download_file(
 
 /// List all files in a directory
 /// files_or_dir = 0 -> files, 1 -> directories
-pub fn list_dir(path: &Path, filter_file_or_dir: Option<bool>) -> Result<Vec<PathBuf>, Error> {
-    let ret: Vec<PathBuf> = std::fs::read_dir(&path)
+pub async fn list_dir(
+    path: &Path,
+    filter_file_or_dir: Option<bool>,
+) -> Result<Vec<PathBuf>, Error> {
+    let mut ret = Vec::new();
+    if let Some(entry) = tokio::fs::read_dir(&path)
+        .await
         .map_err(|_| Error {
             inner: ErrorInner::FailedToReadFileOrDir,
             detail: "".to_string(),
         })?
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_ok())
-        .filter(|entry| match filter_file_or_dir {
-            // unwrap is safe because we checked if file_type is ok
-            Some(true) => entry.file_type().unwrap().is_dir(),
-            Some(false) => entry.file_type().unwrap().is_file(),
-            None => true,
-        })
-        .map(|entry| entry.path())
-        .collect();
+        .next_entry()
+        .await
+        .map_err(|_| Error {
+            inner: ErrorInner::FailedToReadFileOrDir,
+            detail: "".to_string(),
+        })?
+    {
+        if entry.file_type().await.is_ok() {
+            match filter_file_or_dir {
+                Some(true) => {
+                    if entry.file_type().await.unwrap().is_dir() {
+                        ret.push(entry.path());
+                    }
+                }
+                Some(false) => {
+                    if entry.file_type().await.unwrap().is_file() {
+                        ret.push(entry.path());
+                    }
+                }
+                None => {
+                    ret.push(entry.path());
+                }
+            }
+        }
+    }
     Ok(ret)
 }
 
-pub fn unzip_file(
+pub async fn unzip_file(
     file: &Path,
     dest: &Path,
     path_to_runtimes: &Path,
@@ -149,7 +168,7 @@ pub fn unzip_file(
     if !_7zip_path.is_file() {
         return Err(Error{ inner: ErrorInner::FileOrDirNotFound, detail: format!("Runtime dependency {} is not found at {}. Consider downloading the dependency to .lodestone/bin/7zip/, or reinstall Lodestone", _7zip_name, _7zip_path.display()) });
     }
-    std::fs::create_dir_all(dest).map_err(|_| Error {
+    tokio::fs::create_dir_all(dest).await.map_err(|_| Error {
         inner: ErrorInner::FailedToWriteFileOrDir,
         detail: format!("Failed to create directory {}", dest.display()),
     })?;
@@ -157,7 +176,7 @@ pub fn unzip_file(
 
     // TODO: remove hardcoded temp dir
     let tmp_dir = dest.join(format!("tmp_{}", rand_alphanumeric(5)));
-    std::fs::create_dir_all(&tmp_dir).map_err(|_| Error {
+    tokio::fs::create_dir_all(&tmp_dir).await.map_err(|_| Error {
         inner: ErrorInner::FailedToWriteFileOrDir,
         detail: format!("Failed to create directory {}", tmp_dir.display()),
     })?;
@@ -171,13 +190,13 @@ pub fn unzip_file(
             .arg(file)
             .arg("-aoa")
             .arg(format!("-o{}", tmp_dir.display()))
-            .status()
+            .status().await
             .map_err(|_| Error {
                 inner: ErrorInner::FailedToExecute,
                 detail: "Failed to execute 7zip".to_string(),
             })?;
 
-        before = list_dir(dest, None)
+        before = list_dir(dest, None).await
             .map_err(|_| Error {
                 inner: ErrorInner::FailedToReadFileOrDir,
                 detail: "".to_string(),
@@ -192,13 +211,13 @@ pub fn unzip_file(
             .arg("-aoa")
             .arg("-ttar")
             .arg(format!("-o{}", dest.display()))
-            .status()
+            .status().await
             .map_err(|_| Error {
                 inner: ErrorInner::FailedToExecute,
                 detail: "Failed to execute 7zip".to_string(),
             })?;
     } else {
-        before = list_dir(dest, None)
+        before = list_dir(dest, None).await
             .map_err(|_| Error {
                 inner: ErrorInner::FailedToReadFileOrDir,
                 detail: "".to_string(),
@@ -211,13 +230,13 @@ pub fn unzip_file(
             .arg(file)
             .arg(format!("-o{}", dest.display()))
             .arg("-aoa")
-            .status()
+            .status().await
             .map_err(|_| Error {
                 inner: ErrorInner::FailedToExecute,
                 detail: "Failed to execute 7zip".to_string(),
             })?;
     }
-    let after: HashSet<PathBuf> = list_dir(dest, None)
+    let after: HashSet<PathBuf> = list_dir(dest, None).await
         .map_err(|_| Error {
             inner: ErrorInner::FailedToReadFileOrDir,
             detail: "".to_string(),
@@ -225,7 +244,7 @@ pub fn unzip_file(
         .iter()
         .cloned()
         .collect();
-    std::fs::remove_dir_all(tmp_dir).map_err(|_| Error {
+    tokio::fs::remove_dir_all(tmp_dir).await.map_err(|_| Error {
         inner: ErrorInner::FailedToRemoveFileOrDir,
         detail: "Failed to remove tmp dir".to_string(),
     })?;

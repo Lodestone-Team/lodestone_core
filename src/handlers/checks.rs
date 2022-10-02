@@ -17,7 +17,7 @@ pub async fn is_name_in_use(
     Path(name): Path<String>,
 ) -> Json<bool> {
     for (_, instance) in state.instances.lock().await.iter() {
-        if instance.lock().await.name() == name {
+        if instance.lock().await.name().await == name {
             return Json(true);
         }
     }
