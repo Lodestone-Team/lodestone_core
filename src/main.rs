@@ -157,6 +157,7 @@ async fn main() {
         .format_target(false)
         .init();
     let lodestone_path = LODESTONE_PATH.with(|path| path.clone());
+    create_dir_all(&lodestone_path).await.unwrap();
     std::env::set_current_dir(&lodestone_path).expect("Failed to set current dir");
 
     let web_path = lodestone_path.join("web");
