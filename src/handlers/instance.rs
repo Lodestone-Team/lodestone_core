@@ -148,34 +148,39 @@ pub async fn create_minecraft_instance(
 
     let uuid = setup_config.uuid.clone();
 
-    let minecraft_instance = match minecraft::Instance::new(
-        setup_config.clone(),
-        state.event_broadcaster.clone(),
-        Some(query.key),
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            tokio::fs::remove_dir_all(setup_config.path)
+    tokio::task::spawn({
+        let uuid = uuid.clone();
+        async move {
+            let minecraft_instance = match minecraft::Instance::new(
+                setup_config.clone(),
+                state.event_broadcaster.clone(),
+                Some(query.key),
+            )
+            .await
+            {
+                Ok(v) => v,
+                Err(_) => {
+                    tokio::fs::remove_dir_all(setup_config.path)
+                        .await
+                        .map_err(|e| Error {
+                            inner: ErrorInner::FailedToRemoveFileOrDir,
+                            detail: format!(
+                            "Instance creation failed. Failed to clean up instance directory: {}",
+                            e
+                        ),
+                        });
+                    return;
+                }
+            };
+            let mut port_allocator = state.port_allocator.lock().await;
+            port_allocator.add_port(setup_config.port);
+            state
+                .instances
+                .lock()
                 .await
-                .map_err(|e| Error {
-                    inner: ErrorInner::FailedToRemoveFileOrDir,
-                    detail: format!(
-                        "Instance creation failed. Failed to clean up instance directory: {}",
-                        e
-                    ),
-                })?;
-            return Err(e);
+                .insert(uuid.clone(), Arc::new(Mutex::new(minecraft_instance)));
         }
-    };
-    let mut port_allocator = state.port_allocator.lock().await;
-    port_allocator.add_port(setup_config.port);
-    state
-        .instances
-        .lock()
-        .await
-        .insert(uuid.clone(), Arc::new(Mutex::new(minecraft_instance)));
+    });
     Ok(Json(uuid))
 }
 
@@ -232,18 +237,23 @@ pub async fn start_instance(
             detail: "Not authorized to start instance".to_string(),
         });
     }
-    state
-        .instances
-        .lock()
-        .await
+    drop(users);
+    let instance_list = state.instances.lock().await;
+    let mut instance = instance_list
         .get(&uuid)
         .ok_or(Error {
             inner: ErrorInner::InstanceNotFound,
             detail: "".to_string(),
         })?
         .lock()
-        .await
-        .start().await?;
+        .await;
+    if !port_scanner::local_port_available(instance.port().await as u16) {
+        return Err(Error {
+            inner: ErrorInner::PortInUse,
+            detail: format!("Port {} is already in use", instance.port().await),
+        });
+    }
+    instance.start().await?;
     Ok(Json(json!("ok")))
 }
 
@@ -262,7 +272,8 @@ pub async fn stop_instance(
         })?
         .lock()
         .await
-        .stop().await?;
+        .stop()
+        .await?;
     Ok(Json(json!("ok")))
 }
 
@@ -281,7 +292,8 @@ pub async fn kill_instance(
         })?
         .lock()
         .await
-        .kill().await?;
+        .kill()
+        .await?;
     Ok(Json(json!("ok")))
 }
 
@@ -306,7 +318,8 @@ pub async fn send_command(
         })?
         .lock()
         .await
-        .send_command(&query.command).await
+        .send_command(&query.command)
+        .await
     {
         Supported(v) => v.map(|_| Json(json!("ok"))),
         Unsupported => Err(Error {
@@ -320,18 +333,21 @@ pub async fn get_instance_state(
     Extension(state): Extension<AppState>,
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, Error> {
-    Ok(Json(json!(state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .state().await)))
+    Ok(Json(json!(
+        state
+            .instances
+            .lock()
+            .await
+            .get(&uuid)
+            .ok_or(Error {
+                inner: ErrorInner::InstanceNotFound,
+                detail: "".to_string(),
+            })?
+            .lock()
+            .await
+            .state()
+            .await
+    )))
 }
 
 pub async fn get_player_count(
@@ -349,7 +365,8 @@ pub async fn get_player_count(
         })?
         .lock()
         .await
-        .get_player_count().await
+        .get_player_count()
+        .await
     {
         Supported(v) => Ok(Json(v)),
         Unsupported => Err(Error {
@@ -374,7 +391,8 @@ pub async fn get_max_player_count(
         })?
         .lock()
         .await
-        .get_max_player_count().await
+        .get_max_player_count()
+        .await
     {
         Supported(v) => Ok(Json(v)),
         Unsupported => Err(Error {
@@ -399,7 +417,8 @@ pub async fn get_player_list(
         })?
         .lock()
         .await
-        .get_player_list().await
+        .get_player_list()
+        .await
     {
         Supported(v) => Ok(Json(v)),
         Unsupported => Err(Error {
