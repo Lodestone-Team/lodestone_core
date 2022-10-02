@@ -10,8 +10,10 @@ thread_local! {
         build: BuildMetadata::EMPTY,
     };
     pub static LODESTONE_PATH : PathBuf = PathBuf::from(
-        std::env::var("LODESTONE_PATH")
-            .unwrap_or_else(|_| home::home_dir().expect("Cannot get home directory").join(".lodestone").to_str().unwrap().to_string()),
+        match std::env::var("LODESTONE_PATH") {
+    Ok(v) => v,
+    Err(_) => home::home_dir().unwrap_or_else(|| std::env::current_dir().expect("what kinda os are you running lodestone on???")).join(".lodestone").to_str().unwrap().to_string(),
+}
     );
     pub static PATH_TO_INSTANCES : PathBuf = LODESTONE_PATH.with(|p| p.join("instances"));
     pub static PATH_TO_BINARIES : PathBuf = LODESTONE_PATH.with(|p| p.join("bin"));
@@ -32,7 +34,10 @@ impl<'de> serde::Deserialize<'de> for GameType {
         let s = String::deserialize(deserializer)?;
         match s.to_lowercase().as_str() {
             "minecraft" => Ok(GameType::Minecraft),
-            _ => Err(serde::de::Error::custom(format!("Unknown game type: {}", s))),
+            _ => Err(serde::de::Error::custom(format!(
+                "Unknown game type: {}",
+                s
+            ))),
         }
     }
 }
