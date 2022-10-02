@@ -24,6 +24,7 @@ use tokio::{self};
 use tokio::sync::broadcast::Sender;
 
 use crate::events::{Event, EventInner};
+use crate::prelude::PATH_TO_BINARIES;
 use crate::stateful::Stateful;
 use crate::traits::t_configurable::PathBuf;
 
@@ -167,14 +168,7 @@ impl Instance {
         let path_to_macros = config.path.join("macros");
         let path_to_resources = config.path.join("resources");
         let path_to_properties = config.path.join("server.properties");
-        let path_to_runtimes = config
-            .path
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join(".lodestone")
-            .join("bin");
+        let path_to_runtimes = PATH_TO_BINARIES.with(|path| path.clone());
 
         let _ = event_broadcaster.send(Event::new(
             EventInner::Setup(SetupProgress {
@@ -281,7 +275,6 @@ impl Instance {
             let unzipped_content = unzip_file(
                 &downloaded,
                 &path_to_runtimes.join("java"),
-                &path_to_runtimes,
             ).await?;
             if unzipped_content.len() != 1 {
                 return Err(Error {
@@ -442,14 +435,7 @@ impl Instance {
         let path_to_macros = config.path.join("macros");
         let path_to_resources = config.path.join("resources");
         let path_to_properties = config.path.join("server.properties");
-        let path_to_runtimes = config
-            .path
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join(".lodestone")
-            .join("bin");
+        let path_to_runtimes = PATH_TO_BINARIES.with(|path| path.clone());
         let state_callback = {
             let event_broadcaster = event_broadcaster.clone();
             let uuid = config.uuid.clone();
