@@ -3,22 +3,8 @@
 use crate::{
     handlers::instance::{list_instance, start_instance},
     handlers::{
-        checks::{is_name_in_use, is_port_in_use},
-        client_info::get_client_info,
-        events::{console_stream, event_stream, get_console_out_buffer, get_event_buffer},
-        instance::{
-            create_minecraft_instance, get_instance_state, get_max_player_count, get_player_count,
-            get_player_list, kill_instance, remove_instance, send_command, stop_instance,
-        },
-        instance_manifest::get_instance_manifest,
-        instance_setup_configs::{
-            get_available_flavours, get_available_games, get_available_versions,
-        },
-        system::{get_cpu_info, get_disk, get_ram},
-        users::{
-            change_password, delete_user, get_self_info, get_user_info, login, new_user,
-            update_permissions,
-        },
+        checks::*, client_info::*, events::*, instance::*, instance_manifest::*,
+        instance_setup_configs::*, system::*, users::*,
     },
     prelude::{LODESTONE_PATH, PATH_TO_BINARIES, PATH_TO_STORES},
     traits::Error,
@@ -43,7 +29,8 @@ use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
     path::Path,
-    sync::{atomic::AtomicBool, Arc}, time::Duration,
+    sync::{atomic::AtomicBool, Arc},
+    time::Duration,
 };
 use tokio::{
     fs::create_dir_all,
@@ -405,6 +392,11 @@ async fn main() {
             get(get_max_player_count),
         )
         .route("/instance/:uuid/player_list", get(get_player_list))
+        .route("/instance/:uuid/name", get(get_instance_name))
+        .route("/instance/:uuid/name", put(set_instance_name))
+        .route("/instance/:uuid/description", get(get_instance_description))
+        .route("/instance/:uuid/description", put(set_instance_description))
+        .route("/instance/:uuid/info", get(instance_info))
         .route("/user/create", post(new_user))
         .route("/user/:user_id/delete", put(delete_user))
         .route("/user/info", get(get_self_info))
@@ -431,7 +423,7 @@ async fn main() {
 }
 
 async fn test() -> String {
-    tokio::task::spawn(async{
+    tokio::task::spawn(async {
         loop {
             tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_secs(1))).await;
             println!("test");

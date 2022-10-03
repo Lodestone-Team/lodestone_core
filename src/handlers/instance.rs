@@ -11,7 +11,7 @@ use ts_rs::TS;
 
 use crate::implementations::minecraft::{Flavour, SetupConfig};
 use crate::prelude::PATH_TO_INSTANCES;
-use crate::traits::{Supported, Unsupported};
+use crate::traits::{InstanceInfo, Supported, Unsupported};
 
 use super::util::{is_authorized, try_auth};
 use crate::json_store::permission::Permission::{self};
@@ -21,48 +21,16 @@ use crate::{
     AppState,
 };
 
-#[derive(Serialize, Deserialize, Clone, Debug, TS)]
-#[ts(export)]
-pub struct InstanceListInfo {
-    pub uuid: String,
-    pub name: String,
-    pub port: u32,
-    pub description: String,
-    pub game_type: String,
-    pub flavour: String,
-    pub state: State,
-    pub player_count: u32,
-    pub max_player_count: u32,
-    pub creation_time: i64,
-}
-
 pub async fn list_instance(
     Extension(state): Extension<AppState>,
-) -> Result<Json<Vec<InstanceListInfo>>, Error> {
-    let mut list_of_configs: Vec<InstanceListInfo> = join_all(
-        state
-            .instances
-            .lock()
-            .await
-            .iter()
-            .map(|(_, instance)| async move {
-                // want id, name, playercount, maxplayer count, port, state and type
-                let instance = instance.lock().await;
-
-                InstanceListInfo {
-                    uuid: instance.uuid().await,
-                    name: instance.name().await,
-                    port: instance.port().await,
-                    description: instance.description().await,
-                    game_type: instance.game_type().await,
-                    flavour: instance.flavour().await,
-                    state: instance.state().await,
-                    player_count: instance.get_player_count().await.unwrap_or(0),
-                    max_player_count: instance.get_max_player_count().await.unwrap_or(0),
-                    creation_time: instance.creation_time().await,
-                }
-            }),
-    )
+) -> Result<Json<Vec<InstanceInfo>>, Error> {
+    let mut list_of_configs: Vec<InstanceInfo> = join_all(state.instances.lock().await.iter().map(
+        |(_, instance)| async move {
+            // want id, name, playercount, maxplayer count, port, state and type
+            let instance = instance.lock().await;
+            instance.get_instance_info().await
+        },
+    ))
     .await
     .into_iter()
     .collect();
@@ -70,6 +38,27 @@ pub async fn list_instance(
     list_of_configs.sort_by(|a, b| a.creation_time.cmp(&b.creation_time));
 
     Ok(Json(list_of_configs))
+}
+
+pub async fn instance_info(
+    Path(uuid): Path<String>,
+    Extension(state): Extension<AppState>,
+) -> Result<Json<InstanceInfo>, Error> {
+    Ok(Json(
+        state
+            .instances
+            .lock()
+            .await
+            .get(&uuid)
+            .ok_or(Error {
+                inner: ErrorInner::InstanceNotFound,
+                detail: "".to_string(),
+            })?
+            .lock()
+            .await
+            .get_instance_info()
+            .await,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -426,4 +415,90 @@ pub async fn get_player_list(
             detail: "".to_string(),
         }),
     }
+}
+
+pub async fn get_instance_name(
+    Extension(state): Extension<AppState>,
+    Path(uuid): Path<String>,
+) -> Result<Json<String>, Error> {
+    Ok(Json(
+        state
+            .instances
+            .lock()
+            .await
+            .get(&uuid)
+            .ok_or(Error {
+                inner: ErrorInner::InstanceNotFound,
+                detail: "".to_string(),
+            })?
+            .lock()
+            .await
+            .name()
+            .await
+            .to_string(),
+    ))
+}
+
+pub async fn set_instance_name(
+    Extension(state): Extension<AppState>,
+    Path(uuid): Path<String>,
+    Json(name): Json<String>,
+) -> Result<Json<Value>, Error> {
+    state
+        .instances
+        .lock()
+        .await
+        .get(&uuid)
+        .ok_or(Error {
+            inner: ErrorInner::InstanceNotFound,
+            detail: "".to_string(),
+        })?
+        .lock()
+        .await
+        .set_name(name)
+        .await?;
+    Ok(Json(json!("ok")))
+}
+
+pub async fn get_instance_description(
+    Extension(state): Extension<AppState>,
+    Path(uuid): Path<String>,
+) -> Result<Json<String>, Error> {
+    Ok(Json(
+        state
+            .instances
+            .lock()
+            .await
+            .get(&uuid)
+            .ok_or(Error {
+                inner: ErrorInner::InstanceNotFound,
+                detail: "".to_string(),
+            })?
+            .lock()
+            .await
+            .description()
+            .await
+            .to_string(),
+    ))
+}
+
+pub async fn set_instance_description(
+    Extension(state): Extension<AppState>,
+    Path(uuid): Path<String>,
+    Json(description): Json<String>,
+) -> Result<Json<Value>, Error> {
+    state
+        .instances
+        .lock()
+        .await
+        .get(&uuid)
+        .ok_or(Error {
+            inner: ErrorInner::InstanceNotFound,
+            detail: "".to_string(),
+        })?
+        .lock()
+        .await
+        .set_description(description)
+        .await?;
+    Ok(Json(json!("ok")))
 }
