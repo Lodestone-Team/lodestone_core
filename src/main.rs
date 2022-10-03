@@ -4,7 +4,7 @@ use crate::{
     handlers::instance::{list_instance, start_instance},
     handlers::{
         checks::*, client_info::*, events::*, instance::*, instance_manifest::*,
-        instance_setup_configs::*, system::*, users::*,
+        instance_setup_configs::*, system::*, users::get_user_routes,
     },
     prelude::{LODESTONE_PATH, PATH_TO_BINARIES, PATH_TO_STORES},
     traits::Error,
@@ -396,13 +396,6 @@ async fn main() {
         .route("/instance/:uuid/description", get(get_instance_description).put(set_instance_description))
         .route("/instance/:uuid/port", get(get_instance_port).put(set_instance_port))
         .route("/instance/:uuid/info", get(instance_info))
-        .route("/user/create", post(new_user))
-        .route("/user/:user_id/delete", put(delete_user))
-        .route("/user/info", get(get_self_info))
-        .route("/user/:user_id/info", get(get_user_info))
-        .route("/user/update_perm", put(update_permissions))
-        .route("/user/login", get(login))
-        .route("/user/passwd", put(change_password))
         .route("/system/memory", get(get_ram))
         .route("/system/disk", get(get_disk))
         .route("/system/cpu", get(get_cpu_info))
@@ -410,6 +403,7 @@ async fn main() {
         .route("/check/name/:name", get(is_name_in_use))
         .route("/info", get(get_client_info))
         .route("/test", get(test))
+        .nest("/user", get_user_routes())
         .layer(Extension(shared_state))
         .layer(cors);
     let app = Router::new().nest("/api/v1", api_routes);

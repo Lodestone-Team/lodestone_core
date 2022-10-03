@@ -10,7 +10,7 @@ use crate::{
     AppState,
 };
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use axum::{extract::Path, Extension, Json};
+use axum::{extract::Path, Extension, Json, Router, routing::{get, post, put, delete}};
 use axum_auth::{AuthBasic, AuthBearer};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
@@ -312,4 +312,40 @@ pub async fn login(
             detail: "".to_string(),
         })
     }
+}
+
+pub async fn get_all_users(
+    Extension(state): Extension<AppState>,
+    AuthBearer(token): AuthBearer,
+) -> Result<Json<Vec<PublicUser>>, Error> {
+    let users = state.users.lock().await;
+    let requester = try_auth(&token, users.get_ref()).ok_or(Error {
+        inner: ErrorInner::PermissionDenied,
+        detail: "Invalid authorization".to_string(),
+    })?;
+    if !is_authorized(&requester, "", Permission::CanManageUser) {
+        return Err(Error {
+            inner: ErrorInner::PermissionDenied,
+            detail: "You are not authorized to get all users".to_string(),
+        });
+    }
+    let users = users
+        .get_ref()
+        .iter()
+        .map(|(_, user)| PublicUser::from(user.to_owned()))
+        .collect();
+    Ok(Json(users))
+}
+
+// return the thing created by Router::new() so we can nest it in main
+pub fn get_user_routes() -> Router {
+    Router::new()
+        .route("/", get(get_all_users))
+        .route("/", post(new_user))
+        .route("/:uid/info", get(get_user_info))
+        .route("/info", get(get_self_info))
+        .route("/:uid", delete(delete_user))
+        .route("/:uid/update_perm", put(update_permissions))
+        .route("/password", put(change_password))
+        .route("/login", post(login))
 }
