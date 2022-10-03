@@ -90,6 +90,12 @@ impl TConfigurable for Instance {
                 detail: "Name cannot be empty".to_string(),
             });
         }
+        if name.len() > 100 {
+            return Err(traits::Error {
+                inner: ErrorInner::MalformedRequest,
+                detail: "Name cannot be longer than 100 characters".to_string(),
+            });
+        }
         self.config.name = name;
         self.write_config_to_file().await?;
         Ok(())

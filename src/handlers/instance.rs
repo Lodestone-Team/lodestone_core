@@ -125,6 +125,12 @@ pub async fn create_minecraft_instance(
             detail: "Name must not be empty".to_string(),
         });
     }
+    if name.len() > 100 {
+        return Err(Error {
+            inner: ErrorInner::MalformedRequest,
+            detail: "Name must not be longer than 100 characters".to_string(),
+        });
+    }
     for (_, instance) in state.instances.lock().await.iter() {
         let instance = instance.lock().await;
         if instance.name().await == name {
