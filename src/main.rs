@@ -1,10 +1,11 @@
 #![allow(clippy::comparison_chain, clippy::type_complexity)]
 
 use crate::{
-    handlers::instance::{list_instance, start_instance},
     handlers::{
-        checks::*, client_info::*, events::*, instance::*, instance_manifest::*,
-        instance_setup_configs::*, system::*, users::get_user_routes,
+        checks::get_checks_routes, events::get_events_routes, instance::*,
+        instance_manifest::get_instance_manifest_routes,
+        instance_setup_configs::get_instance_setup_config_routes, system::get_system_routes,
+        users::get_user_routes, client_info::get_client_info_routes, instance_server::get_instance_server_routes, instance_config::get_instance_config_routes, instance_players::get_instance_players_routes,
     },
     prelude::{LODESTONE_PATH, PATH_TO_BINARIES, PATH_TO_STORES},
     traits::Error,
@@ -358,52 +359,18 @@ async fn main() {
         .allow_origin(Any);
 
     let api_routes = Router::new()
-        .route("/events/:uuid/stream", get(event_stream))
-        .route("/events/:uuid/buffer", get(get_event_buffer))
-        .route("/instance/:uuid/console/stream", get(console_stream))
-        .route(
-            "/instance/:uuid/console/buffer",
-            get(get_console_out_buffer),
-        )
-        .route("/instance/:uuid/console", post(send_command))
-        .route("/instance_setup_info/games", get(get_available_games))
-        .route(
-            "/instance_setup_info/flavours/:game_type",
-            get(get_available_flavours),
-        )
-        .route(
-            "/instance_setup_info/:game_type/versions/:flavour",
-            get(get_available_versions),
-        )
-        .route("/instance/list", get(list_instance))
-        .route("/instance/:uuid/manifest", get(get_instance_manifest))
-        .route(
-            "/instance/minecraft/create",
-            post(create_minecraft_instance),
-        )
-        .route("/instance/:uuid/start", put(start_instance))
-        .route("/instance/:uuid/stop", put(stop_instance))
-        .route("/instance/:uuid/delete", put(remove_instance))
-        .route("/instance/:uuid/kill", put(kill_instance))
-        .route("/instance/:uuid/state", get(get_instance_state))
-        .route("/instance/:uuid/player_count", get(get_player_count))
-        .route(
-            "/instance/:uuid/max_player_count",
-            get(get_max_player_count),
-        )
-        .route("/instance/:uuid/player_list", get(get_player_list))
-        .route("/instance/:uuid/name", get(get_instance_name).put(set_instance_name))
-        .route("/instance/:uuid/description", get(get_instance_description).put(set_instance_description))
-        .route("/instance/:uuid/port", get(get_instance_port).put(set_instance_port))
-        .route("/instance/:uuid/info", get(instance_info))
-        .route("/system/memory", get(get_ram))
-        .route("/system/disk", get(get_disk))
-        .route("/system/cpu", get(get_cpu_info))
-        .route("/check/port/:port", get(is_port_in_use))
-        .route("/check/name/:name", get(is_name_in_use))
-        .route("/info", get(get_client_info))
+        .merge(get_events_routes())
+        .merge(get_instance_setup_config_routes())
+        .merge(get_instance_manifest_routes())
+        .merge(get_instance_server_routes())
+        .merge(get_instance_config_routes())
+        .merge(get_instance_players_routes())
+        .merge(get_instance_routes())
+        .merge(get_system_routes())
+        .merge(get_checks_routes())
+        .merge(get_user_routes())
+        .merge(get_client_info_routes())
         .route("/test", get(test))
-        .nest("/user", get_user_routes())
         .layer(Extension(shared_state))
         .layer(cors);
     let app = Router::new().nest("/api/v1", api_routes);

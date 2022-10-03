@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use axum::{
     extract::{ws::WebSocket, Path, Query, WebSocketUpgrade},
     response::Response,
-    Extension, Json,
+    Extension, Json, Router, routing::get,
 };
 use axum_auth::AuthBearer;
 
@@ -50,7 +50,7 @@ pub async fn get_event_buffer(
     ))
 }
 
-pub async fn get_console_out_buffer(
+pub async fn get_console_buffer(
     Extension(state): Extension<AppState>,
     AuthBearer(token): AuthBearer,
     Path(uuid): Path<String>,
@@ -195,4 +195,12 @@ async fn console_stream_ws(
             _ => continue,
         }
     }
+}
+
+pub fn get_events_routes() -> Router {
+    Router::new()
+        .route("/events/:uuid/stream", get(event_stream))
+        .route("/events/:uuid/buffer", get(get_event_buffer))
+        .route("/instance/:uuid/console/stream", get(console_stream))
+        .route("/instance/:uuid/console/buffer", get(get_console_buffer))
 }

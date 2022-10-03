@@ -1,5 +1,4 @@
-use axum::{extract::Path, Extension, Json};
-use serde_json::{json, Value};
+use axum::{extract::Path, Extension, Json, Router, routing::get};
 
 use crate::{
     traits::{t_manifest::Manifest, Error, ErrorInner},
@@ -27,48 +26,7 @@ pub async fn get_instance_manifest(
     ))
 }
 
-pub async fn get_instance_port(
-    Path(uuid): Path<String>,
-    Extension(state): Extension<AppState>,
-) -> Result<Json<u32>, Error> {
-    Ok(Json(
-        state
-            .instances
-            .lock()
-            .await
-            .get(&uuid)
-            .ok_or(Error {
-                inner: ErrorInner::InstanceNotFound,
-                detail: "".to_string(),
-            })?
-            .lock()
-            .await
-            .port()
-            .await,
-    ))
-}
-
-pub async fn set_instance_port(
-    Path(uuid): Path<String>,
-    Extension(state): Extension<AppState>,
-    Json(port): Json<u32>,
-) -> Result<Json<String>, Error> {
-    state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .set_port(port)
-        .await
-        .ok_or(Error {
-            inner: ErrorInner::UnsupportedOperation,
-            detail: "".to_string(),
-        })??;
-    Ok(Json("ok".to_string()))
+pub fn get_instance_manifest_routes() -> Router {
+    Router::new()
+        .route("/instance/:uuid/manifest", get(get_instance_manifest))
 }

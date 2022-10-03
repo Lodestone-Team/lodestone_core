@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use axum::Router;
+use axum::routing::get;
 use axum::{extract::Path, Json};
 
 use crate::prelude::GameType;
@@ -30,4 +32,11 @@ pub async fn get_available_versions(
             _ => unimplemented!(),
         },
     }
+}
+
+pub fn get_instance_setup_config_routes() -> Router {
+    Router::new()
+        .route("/games", get(get_available_games))
+        .route("/games/:game_type/flavours", get(get_available_flavours))
+        .route("/games/:game_type/flavours/:flavour/versions", get(get_available_versions))
 }

@@ -340,12 +340,12 @@ pub async fn get_all_users(
 // return the thing created by Router::new() so we can nest it in main
 pub fn get_user_routes() -> Router {
     Router::new()
-        .route("/", get(get_all_users))
-        .route("/", post(new_user))
-        .route("/:uid/info", get(get_user_info))
-        .route("/info", get(get_self_info))
-        .route("/:uid", delete(delete_user))
-        .route("/:uid/update_perm", put(update_permissions))
-        .route("/password", put(change_password))
-        .route("/login", post(login))
+        .route("/user/list", get(get_all_users))
+        .route("/user", post(new_user))
+        .route("/user/:uid", get(get_user_info))
+        .route("/user/:uid", delete(delete_user))
+        .route("/user/:uid/update_perm", put(update_permissions))
+        .route("/user/info", get(get_self_info))
+        .route("/user/password", put(change_password))
+        .route("/user/login", post(login))
 }

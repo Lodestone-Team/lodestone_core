@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::Query;
+use axum::routing::{get, post, delete};
 use axum::{extract::Path, Extension, Json};
 use axum_auth::AuthBearer;
 use futures::future::join_all;
@@ -21,7 +23,7 @@ use crate::{
     AppState,
 };
 
-pub async fn list_instance(
+pub async fn get_instance_list(
     Extension(state): Extension<AppState>,
 ) -> Result<Json<Vec<InstanceInfo>>, Error> {
     let mut list_of_configs: Vec<InstanceInfo> = join_all(state.instances.lock().await.iter().map(
@@ -40,7 +42,7 @@ pub async fn list_instance(
     Ok(Json(list_of_configs))
 }
 
-pub async fn instance_info(
+pub async fn get_instance_info(
     Path(uuid): Path<String>,
     Extension(state): Extension<AppState>,
 ) -> Result<Json<InstanceInfo>, Error> {
@@ -179,7 +181,7 @@ pub async fn create_minecraft_instance(
     Ok(Json(uuid))
 }
 
-pub async fn remove_instance(
+pub async fn delete_instance(
     Extension(state): Extension<AppState>,
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, Error> {
@@ -216,295 +218,10 @@ pub async fn remove_instance(
     }
 }
 
-pub async fn start_instance(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-    AuthBearer(token): AuthBearer,
-) -> Result<Json<Value>, Error> {
-    let users = state.users.lock().await;
-    let requester = try_auth(&token, users.get_ref()).ok_or(Error {
-        inner: ErrorInner::PermissionDenied,
-        detail: "".to_string(),
-    })?;
-    if !is_authorized(&requester, &uuid, Permission::CanStartInstance) {
-        return Err(Error {
-            inner: ErrorInner::PermissionDenied,
-            detail: "Not authorized to start instance".to_string(),
-        });
-    }
-    drop(users);
-    let instance_list = state.instances.lock().await;
-    let mut instance = instance_list
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await;
-    if !port_scanner::local_port_available(instance.port().await as u16) {
-        return Err(Error {
-            inner: ErrorInner::PortInUse,
-            detail: format!("Port {} is already in use", instance.port().await),
-        });
-    }
-    instance.start().await?;
-    Ok(Json(json!("ok")))
-}
-
-pub async fn stop_instance(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-) -> Result<Json<Value>, Error> {
-    state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .stop()
-        .await?;
-    Ok(Json(json!("ok")))
-}
-
-pub async fn kill_instance(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-) -> Result<Json<Value>, Error> {
-    state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .kill()
-        .await?;
-    Ok(Json(json!("ok")))
-}
-
-#[derive(Deserialize)]
-pub struct SendCommandQuery {
-    command: String,
-}
-
-pub async fn send_command(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-    Query(query): Query<SendCommandQuery>,
-) -> Result<Json<Value>, Error> {
-    match state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .send_command(&query.command)
-        .await
-    {
-        Supported(v) => v.map(|_| Json(json!("ok"))),
-        Unsupported => Err(Error {
-            inner: ErrorInner::UnsupportedOperation,
-            detail: "".to_string(),
-        }),
-    }
-}
-
-pub async fn get_instance_state(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-) -> Result<Json<Value>, Error> {
-    Ok(Json(json!(
-        state
-            .instances
-            .lock()
-            .await
-            .get(&uuid)
-            .ok_or(Error {
-                inner: ErrorInner::InstanceNotFound,
-                detail: "".to_string(),
-            })?
-            .lock()
-            .await
-            .state()
-            .await
-    )))
-}
-
-pub async fn get_player_count(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-) -> Result<Json<u32>, Error> {
-    match state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .get_player_count()
-        .await
-    {
-        Supported(v) => Ok(Json(v)),
-        Unsupported => Err(Error {
-            inner: ErrorInner::UnsupportedOperation,
-            detail: "".to_string(),
-        }),
-    }
-}
-
-pub async fn get_max_player_count(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-) -> Result<Json<u32>, Error> {
-    match state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .get_max_player_count()
-        .await
-    {
-        Supported(v) => Ok(Json(v)),
-        Unsupported => Err(Error {
-            inner: ErrorInner::UnsupportedOperation,
-            detail: "".to_string(),
-        }),
-    }
-}
-
-pub async fn get_player_list(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-) -> Result<Json<Vec<Value>>, Error> {
-    match state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .get_player_list()
-        .await
-    {
-        Supported(v) => Ok(Json(v)),
-        Unsupported => Err(Error {
-            inner: ErrorInner::UnsupportedOperation,
-            detail: "".to_string(),
-        }),
-    }
-}
-
-pub async fn get_instance_name(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-) -> Result<Json<String>, Error> {
-    Ok(Json(
-        state
-            .instances
-            .lock()
-            .await
-            .get(&uuid)
-            .ok_or(Error {
-                inner: ErrorInner::InstanceNotFound,
-                detail: "".to_string(),
-            })?
-            .lock()
-            .await
-            .name()
-            .await
-            .to_string(),
-    ))
-}
-
-pub async fn set_instance_name(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-    Json(name): Json<String>,
-) -> Result<Json<Value>, Error> {
-    state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .set_name(name)
-        .await?;
-    Ok(Json(json!("ok")))
-}
-
-pub async fn get_instance_description(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-) -> Result<Json<String>, Error> {
-    Ok(Json(
-        state
-            .instances
-            .lock()
-            .await
-            .get(&uuid)
-            .ok_or(Error {
-                inner: ErrorInner::InstanceNotFound,
-                detail: "".to_string(),
-            })?
-            .lock()
-            .await
-            .description()
-            .await
-            .to_string(),
-    ))
-}
-
-pub async fn set_instance_description(
-    Extension(state): Extension<AppState>,
-    Path(uuid): Path<String>,
-    Json(description): Json<String>,
-) -> Result<Json<Value>, Error> {
-    state
-        .instances
-        .lock()
-        .await
-        .get(&uuid)
-        .ok_or(Error {
-            inner: ErrorInner::InstanceNotFound,
-            detail: "".to_string(),
-        })?
-        .lock()
-        .await
-        .set_description(description)
-        .await?;
-    Ok(Json(json!("ok")))
+pub fn get_instance_routes() -> Router {
+    Router::new()
+        .route("/instance/list", get(get_instance_list))
+        .route("/instance/minecraft ", post(create_minecraft_instance))
+        .route("/instance/:uuid", delete(delete_instance))
+        .route("/instance/:uuid/info", get(get_instance_info))
 }

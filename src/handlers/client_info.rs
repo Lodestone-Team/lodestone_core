@@ -1,7 +1,7 @@
 use std::{env, sync::atomic::Ordering};
 
 use crate::{AppState, prelude::VERSION};
-use axum::{Extension, Json};
+use axum::{Extension, Json, Router, routing::get};
 use serde::{Deserialize, Serialize};
 use sysinfo::{CpuExt, DiskExt, System, SystemExt};
 
@@ -49,4 +49,8 @@ pub async fn get_client_info(Extension(state): Extension<AppState>) -> Json<Clie
         uuid: state.uuid.clone(),
         up_since: state.up_since,
     })
+}
+
+pub fn get_client_info_routes() -> Router {
+    Router::new().route("/info", get(get_client_info))
 }

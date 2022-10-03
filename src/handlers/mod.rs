@@ -10,3 +10,6 @@ pub mod client_info;
 pub mod checks;
 pub mod instance_setup_configs;
 pub mod instance_manifest;
+pub mod instance_server;
+pub mod instance_players;
+pub mod instance_config;
