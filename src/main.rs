@@ -392,10 +392,9 @@ async fn main() {
             get(get_max_player_count),
         )
         .route("/instance/:uuid/player_list", get(get_player_list))
-        .route("/instance/:uuid/name", get(get_instance_name))
-        .route("/instance/:uuid/name", put(set_instance_name))
-        .route("/instance/:uuid/description", get(get_instance_description))
-        .route("/instance/:uuid/description", put(set_instance_description))
+        .route("/instance/:uuid/name", get(get_instance_name).put(set_instance_name))
+        .route("/instance/:uuid/description", get(get_instance_description).put(set_instance_description))
+        .route("/instance/:uuid/port", get(get_instance_port).put(set_instance_port))
         .route("/instance/:uuid/info", get(instance_info))
         .route("/user/create", post(new_user))
         .route("/user/:user_id/delete", put(delete_user))
