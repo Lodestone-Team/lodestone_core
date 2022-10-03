@@ -10,7 +10,11 @@ use crate::{
     AppState,
 };
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use axum::{extract::Path, Extension, Json, Router, routing::{get, post, put, delete}};
+use axum::{
+    extract::Path,
+    routing::{delete, get, post, put},
+    Extension, Json, Router,
+};
 use axum_auth::{AuthBasic, AuthBearer};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
@@ -178,11 +182,13 @@ pub async fn get_self_info(
     AuthBearer(token): AuthBearer,
 ) -> Result<Json<PublicUser>, Error> {
     let users = state.users.lock().await;
-    let user = try_auth(&token, users.get_ref()).ok_or(Error {
-        inner: ErrorInner::PermissionDenied,
-        detail: "".to_string(),
-    })?;
-    Ok(Json(PublicUser::from(user)))
+    Ok(Json(
+        (&try_auth(&token, users.get_ref()).ok_or(Error {
+            inner: ErrorInner::PermissionDenied,
+            detail: "".to_string(),
+        })?)
+            .into(),
+    ))
 }
 
 pub async fn get_user_info(
@@ -201,15 +207,16 @@ pub async fn get_user_info(
             detail: "You are not authorized to get this user's info".to_string(),
         });
     }
-    let user = users
-        .get_ref()
-        .get(&uid)
-        .ok_or(Error {
-            inner: ErrorInner::MalformedRequest,
-            detail: "".to_string(),
-        })?
-        .to_owned();
-    Ok(Json(PublicUser::from(user)))
+    Ok(Json(
+        users
+            .get_ref()
+            .get(&uid)
+            .ok_or(Error {
+                inner: ErrorInner::MalformedRequest,
+                detail: "".to_string(),
+            })?
+            .into(),
+    ))
 }
 
 pub async fn change_password(
@@ -303,7 +310,7 @@ pub async fn login(
         } else {
             Ok(Json(LoginReply {
                 token: create_jwt(user, &user.secret)?,
-                user: PublicUser::from(user.to_owned()),
+                user: user.into(),
             }))
         }
     } else {
@@ -332,7 +339,7 @@ pub async fn get_all_users(
     let users = users
         .get_ref()
         .iter()
-        .map(|(_, user)| PublicUser::from(user.to_owned()))
+        .map(|(_, user)| user.into())
         .collect();
     Ok(Json(users))
 }
