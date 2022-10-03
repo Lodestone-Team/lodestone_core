@@ -4,19 +4,18 @@ use axum::Router;
 use axum::extract::Query;
 use axum::routing::{get, post, delete};
 use axum::{extract::Path, Extension, Json};
-use axum_auth::AuthBearer;
+
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
-use ts_rs::TS;
 
 use crate::implementations::minecraft::{Flavour, SetupConfig};
 use crate::prelude::PATH_TO_INSTANCES;
-use crate::traits::{InstanceInfo, Supported, Unsupported};
+use crate::traits::{InstanceInfo};
 
-use super::util::{is_authorized, try_auth};
-use crate::json_store::permission::Permission::{self};
+
+
 use crate::{
     implementations::minecraft,
     traits::{t_server::State, Error, ErrorInner},

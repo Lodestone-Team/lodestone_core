@@ -1,18 +1,18 @@
 use axum::{Router, routing::{put, post, get}, Extension, extract::Path};
 
-use axum::extract::Query;
-use axum::{Json};
+
+use axum::Json;
 use axum_auth::AuthBearer;
-use serde::{Deserialize, Serialize};
+
 use serde_json::{json, Value};
 
-use crate::implementations::minecraft::{Flavour, SetupConfig};
-use crate::traits::{InstanceInfo, Supported, Unsupported};
+
+use crate::traits::{Supported, Unsupported};
 
 use super::util::{is_authorized, try_auth};
 use crate::json_store::permission::Permission::{self};
 use crate::{
-    traits::{t_server::State, Error, ErrorInner},
+    traits::{Error, ErrorInner},
     AppState,
 };
 

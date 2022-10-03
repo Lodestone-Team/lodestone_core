@@ -13,7 +13,7 @@ use crate::{
 };
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use axum::{
-    routing::{get, post, put},
+    routing::get,
     Extension, Router,
 };
 use events::Event;

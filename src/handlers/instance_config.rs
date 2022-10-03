@@ -1,7 +1,7 @@
 use axum::{extract::Path, Extension, Json, Router, routing::get};
 
 use crate::{
-    traits::{t_manifest::Manifest, Error, ErrorInner},
+    traits::{Error, ErrorInner},
     AppState,
 };
 
@@ -69,7 +69,7 @@ pub async fn get_instance_name(
             .await
             .name()
             .await
-            .to_string(),
+            ,
     ))
 }
 
@@ -112,7 +112,7 @@ pub async fn get_instance_description(
             .await
             .description()
             .await
-            .to_string(),
+            ,
     ))
 }
 

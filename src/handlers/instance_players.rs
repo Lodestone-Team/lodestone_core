@@ -2,10 +2,10 @@ use axum::{extract::Path, Extension, Json, Router, routing::get};
 use serde_json::Value;
 
 use crate::{
-    traits::{t_manifest::Manifest, Error, ErrorInner},
+    traits::{Error, ErrorInner},
     AppState,
 };
-use crate::traits::{InstanceInfo, Supported, Unsupported};
+use crate::traits::{Supported, Unsupported};
 
 pub async fn get_player_count(
     Extension(state): Extension<AppState>,
