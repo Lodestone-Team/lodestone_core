@@ -3,12 +3,13 @@ use std::{collections::HashMap, sync::Arc};
 use axum::{
     extract::{ws::WebSocket, Path, Query, WebSocketUpgrade},
     response::Response,
-    Extension, Json, Router, routing::get,
+    routing::get,
+    Extension, Json, Router,
 };
 use axum_auth::AuthBearer;
 
 use futures::{SinkExt, StreamExt};
-use log::error;
+use log::{debug, error};
 use ringbuffer::RingBufferExt;
 
 use serde::Deserialize;
@@ -111,7 +112,39 @@ async fn event_stream_ws(
     uid: String,
     users: Arc<Mutex<Stateful<HashMap<String, User>>>>,
 ) {
-    let (mut sender, mut _receiver) = stream.split();
+    let (mut sender, mut receiver) = stream.split();
+    loop {
+        tokio::select! {
+            Ok(event) = event_receiver.recv() => {
+                if event.instance_uuid != uuid && uuid != "all" {
+                    continue;
+                }
+                if can_user_view_event(
+                    &event,
+                    match users.lock().await.get_ref().get(&uid) {
+                        Some(user) => user,
+                        None => break,
+                    },
+                ) {
+                    if let Err(e) = sender
+                        .send(axum::extract::ws::Message::Text(
+                            serde_json::to_string(&event).unwrap(),
+                        ))
+                        .await
+                    {
+                        error!("Failed to send event: {}", e);
+                        break;
+                    }
+                }
+            }
+            Some(Ok(ws_msg)) = receiver.next() => {
+                match sender.send(ws_msg).await {
+                    Ok(_) => debug!("Replied to ping"),
+                    Err(_) => break,
+                };
+            }
+        }
+    }
 
     while let Ok(event) = event_receiver.recv().await {
         if event.instance_uuid != uuid && uuid != "all" {
