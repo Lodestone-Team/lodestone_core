@@ -220,7 +220,7 @@ pub async fn delete_instance(
 pub fn get_instance_routes() -> Router {
     Router::new()
         .route("/instance/list", get(get_instance_list))
-        .route("/instance/minecraft ", post(create_minecraft_instance))
+        .route("/instance/minecraft", post(create_minecraft_instance))
         .route("/instance/:uuid", delete(delete_instance))
         .route("/instance/:uuid/info", get(get_instance_info))
 }
