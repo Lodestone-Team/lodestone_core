@@ -1,20 +1,18 @@
 use std::sync::Arc;
 
+use axum::routing::{delete, get, post};
 use axum::Router;
-use axum::extract::Query;
-use axum::routing::{get, post, delete};
 use axum::{extract::Path, Extension, Json};
 
 use futures::future::join_all;
+use log::info;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use crate::implementations::minecraft::{Flavour, SetupConfig};
 use crate::prelude::PATH_TO_INSTANCES;
-use crate::traits::{InstanceInfo};
-
-
+use crate::traits::InstanceInfo;
 
 use crate::{
     implementations::minecraft,
@@ -62,11 +60,6 @@ pub async fn get_instance_info(
     ))
 }
 
-#[derive(Deserialize)]
-pub struct InstanceCreateQuery {
-    pub key: String,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MinecraftSetupConfigPrimitive {
     pub name: String,
@@ -89,6 +82,7 @@ pub struct MinecraftSetupConfigPrimitive {
 
 impl From<MinecraftSetupConfigPrimitive> for SetupConfig {
     fn from(config: MinecraftSetupConfigPrimitive) -> Self {
+        let uuid = uuid::Uuid::new_v4().to_string();
         SetupConfig {
             name: config.name.clone(),
             version: config.version,
@@ -107,19 +101,20 @@ impl From<MinecraftSetupConfigPrimitive> for SetupConfig {
             start_on_connection: config.start_on_connection,
             backup_period: config.backup_period,
             game_type: "minecraft".to_string(),
-            uuid: uuid::Uuid::new_v4().to_string(),
-            path: PATH_TO_INSTANCES.with(|path| path.join(config.name)),
+            uuid: uuid.clone(),
+            path: PATH_TO_INSTANCES
+                .with(|path| path.join(format!("{}-{}", config.name, uuid[0..8].to_string()))),
         }
     }
 }
 pub async fn create_minecraft_instance(
     Extension(state): Extension<AppState>,
     Json(mut primitive_setup_config): Json<MinecraftSetupConfigPrimitive>,
-    Query(query): Query<InstanceCreateQuery>,
 ) -> Result<Json<String>, Error> {
+    println!("Creating minecraft instance");
     primitive_setup_config.name = sanitize_filename::sanitize(&primitive_setup_config.name);
-    let setup_config: SetupConfig = primitive_setup_config.into();
-    let name = setup_config.name.clone();
+    let mut setup_config: SetupConfig = primitive_setup_config.into();
+    let mut name = setup_config.name.clone();
     if name.is_empty() {
         return Err(Error {
             inner: ErrorInner::MalformedRequest,
@@ -132,25 +127,26 @@ pub async fn create_minecraft_instance(
             detail: "Name must not be longer than 100 characters".to_string(),
         });
     }
+    name = format!("{}-{}", name, setup_config.uuid[0..5].to_string());
     for (_, instance) in state.instances.lock().await.iter() {
-        let instance = instance.lock().await;
-        if instance.name().await == name {
-            return Err(Error {
-                inner: ErrorInner::MalformedRequest,
-                detail: "Instance with name already exists".to_string(),
-            });
+        let path = instance.lock().await.path().await;
+        if path == setup_config.path {
+            while path == setup_config.path {
+                info!("You just hit the lottery");
+                setup_config.uuid = uuid::Uuid::new_v4().to_string();
+                name = format!("{}-{}", name, setup_config.uuid[0..5].to_string());
+                setup_config.name = name.clone();
+            }
         }
     }
 
     let uuid = setup_config.uuid.clone();
-
     tokio::task::spawn({
         let uuid = uuid.clone();
         async move {
             let minecraft_instance = match minecraft::Instance::new(
                 setup_config.clone(),
                 state.event_broadcaster.clone(),
-                Some(query.key),
             )
             .await
             {
@@ -220,7 +216,7 @@ pub async fn delete_instance(
 pub fn get_instance_routes() -> Router {
     Router::new()
         .route("/instance/list", get(get_instance_list))
-        .route("/instance/minecraft ", post(create_minecraft_instance))
+        .route("/instance/minecraft", post(create_minecraft_instance))
         .route("/instance/:uuid", delete(delete_instance))
         .route("/instance/:uuid/info", get(get_instance_info))
 }
