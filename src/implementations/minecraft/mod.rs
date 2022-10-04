@@ -30,7 +30,7 @@ use crate::traits::t_configurable::PathBuf;
 
 use crate::traits::t_server::State;
 use crate::traits::{Error, ErrorInner, TInstance};
-use crate::util::{download_file, unzip_file, SetupProgress};
+use crate::util::{download_file, unzip_file, SetupProgress, rand_alphanumeric};
 
 use self::util::{get_fabric_jar_url, get_jre_url, get_vanilla_jar_url, read_properties_from_path};
 
@@ -161,7 +161,6 @@ impl Instance {
     pub async fn new(
          config: SetupConfig,
         event_broadcaster: Sender<Event>,
-        idempotency: Option<String>,
     ) -> Result<Instance, Error> {
         let path_to_config = config.path.join(".lodestone_config");
         let path_to_eula = config.path.join("eula.txt");
@@ -178,7 +177,7 @@ impl Instance {
             config.uuid.clone(),
             config.name.clone(),
             "".to_string(),
-            idempotency.clone(),
+            Some(rand_alphanumeric(5)),
         ));
         tokio::fs::create_dir_all(&config.path).await.map_err(|_| Error {
             inner: ErrorInner::FailedToWriteFileOrDir,
@@ -232,7 +231,7 @@ impl Instance {
             config.uuid.clone(),
             config.name.clone(),
             "".to_string(),
-            idempotency.clone(),
+            Some(rand_alphanumeric(5)),
         ));
         let (url, jre_major_version) = get_jre_url(config.version.as_str()).await.ok_or(Error {
             inner: ErrorInner::VersionNotFound,
@@ -250,14 +249,13 @@ impl Instance {
                 let event_broadcaster = event_broadcaster.clone();
                 let uuid = config.uuid.clone();
                 let name = config.name.clone();
-                let idempotency = idempotency.clone();
                 &move |dl| {
                     let _ = event_broadcaster.send(Event::new(
                         EventInner::Downloading(dl),
                         uuid.clone(),
                         name.clone(),
                         "".to_string(),
-                        idempotency.clone(),
+                        Some(rand_alphanumeric(5)),
                     ));
                 }
             }, true)
@@ -270,7 +268,7 @@ impl Instance {
                 config.uuid.clone(),
                 config.name.clone(),
                 "".to_string(),
-                idempotency.clone(),
+                Some(rand_alphanumeric(5)),
             ));
             let unzipped_content = unzip_file(
                 &downloaded,
@@ -308,7 +306,7 @@ impl Instance {
             config.uuid.clone(),
             config.name.clone(),
             "".to_string(),
-            idempotency.clone(),
+            Some(rand_alphanumeric(5)),
         ));
 
         match config.flavour {
@@ -330,14 +328,13 @@ impl Instance {
                         let event_broadcaster = event_broadcaster.clone();
                         let uuid = config.uuid.clone();
                         let name = config.name.clone();
-                        let idempotency = idempotency.clone();
                         &move |dl| {
                             let _ = event_broadcaster.send(Event::new(
                                 EventInner::Downloading(dl),
                                 uuid.clone(),
                                 name.clone(),
                                 "".to_string(),
-                                idempotency.clone(),
+                                Some(rand_alphanumeric(5)),
                             ));
                         }
                     },
@@ -368,14 +365,13 @@ impl Instance {
                         let event_broadcaster = event_broadcaster.clone();
                         let uuid = config.uuid.clone();
                         let name = config.name.clone();
-                        let idempotency = idempotency.clone();
                         &move |dl| {
                             let _ = event_broadcaster.send(Event::new(
                                 EventInner::Downloading(dl),
                                 uuid.clone(),
                                 name.clone(),
                                 "".to_string(),
-                                idempotency.clone(),
+                                Some(rand_alphanumeric(5)),
                             ));
                         }
                     },
