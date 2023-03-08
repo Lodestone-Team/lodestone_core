@@ -18,7 +18,7 @@ use crate::traits::t_macro::TMacro;
 use crate::traits::t_server::{MonitorReport, State, StateAction, TServer};
 
 use crate::types::Snowflake;
-use crate::util::dont_spawn_terminal;
+use crate::util::{dont_spawn_terminal, list_dir};
 
 use super::r#macro::{resolve_macro_invocation, MinecraftMainWorkerGenerator};
 use super::{MinecraftInstance, Flavour, ForgeBuildVersion};
@@ -103,19 +103,58 @@ impl TServer for MinecraftInstance {
         let server_start_command = match &self.config.flavour {
             Flavour::Forge { build_version } => {
                 let ForgeBuildVersion(build_version) = build_version.as_ref().ok_or_else(|| eyre!("Forge version not found"))?;
-                let forge_args = match std::env::consts::OS {
-                    "windows" => "win_args.txt",
-                    _ => "unix_args.txt"
-                };
-                let mut full_forge_args = std::ffi::OsString::from("@");
-                full_forge_args.push(
-                    self.config.path
-                        .join("libraries").join("net").join("minecraftforge").join("forge")
-                        .join(format!("{}-{}", self.config.version, build_version.as_str()))
-                        .join(forge_args)
-                        .into_os_string().as_os_str()
-                );
-                server_start_command.arg(full_forge_args)
+                let version_parts: Vec<&str> = self.config.version.split('.').collect();
+                let major_version: i32 = version_parts[1].parse().context("Unable to parse major Minecraft version for Forge")?;
+
+                if 17 <= major_version {
+                    let forge_args = match std::env::consts::OS {
+                        "windows" => "win_args.txt",
+                        _ => "unix_args.txt"
+                    };
+    
+                    let mut full_forge_args = std::ffi::OsString::from("@");
+                    full_forge_args.push(
+                        self.config.path
+                            .join("libraries").join("net").join("minecraftforge").join("forge")
+                            .join(format!("{}-{}", self.config.version, build_version.as_str()))
+                            .join(forge_args)
+                            .into_os_string().as_os_str()
+                    );
+    
+                    server_start_command.arg(full_forge_args)
+                } else if 7 <= major_version && major_version <= 16 {
+                    let files = list_dir(&self.config.path, Some(false))
+                        .await.context("Failed to find forge.jar")?;
+                    let forge_jar_name = files
+                        .iter()
+                        .filter(|p| {
+                            p.extension().unwrap_or(std::ffi::OsStr::new("")) == "jar" &&
+                            p.file_name().unwrap_or(std::ffi::OsStr::new(""))
+                                .to_str().unwrap_or("")
+                                .starts_with(format!("forge-{}-{}", self.config.version, build_version.as_str()).as_str())
+                        })
+                        .nth(0).ok_or_else(|| eyre!("Failed to find forge.jar"))?;
+                    server_start_command
+                    .arg("-jar")
+                    .arg(&self.config.path.join(forge_jar_name))
+                } else {
+                    // 1.5 doesn't work due to JRE issues
+                    // 1.4 doesn't work since forge doesn't provide an installer
+                    let files = list_dir(&self.config.path, Some(false))
+                        .await.context("Failed to find minecraftforge.jar")?;
+                    let server_jar_name = files
+                        .iter()
+                        .filter(|p| {
+                            p.extension().unwrap_or(std::ffi::OsStr::new("")) == "jar" &&
+                            p.file_name().unwrap_or(std::ffi::OsStr::new(""))
+                                .to_str().unwrap_or("")
+                                .starts_with("minecraftforge")
+                        })
+                        .nth(0).ok_or_else(|| eyre!("Failed to find minecraftforge.jar"))?;
+                    server_start_command
+                    .arg("-jar")
+                    .arg(&self.config.path.join(server_jar_name))
+                }
             }
             _ => server_start_command
                 .arg("-jar")

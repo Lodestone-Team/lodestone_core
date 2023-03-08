@@ -394,10 +394,10 @@ impl MinecraftInstance {
 
             if !dont_spawn_terminal(
                 Command::new(&jre)
+                    .current_dir(&config.path)
                     .arg("-jar")
-                    .arg(&config.path.join("forge-installer.jar"))
-                    .arg("--installServer")
-                    .arg(&config.path),
+                    .arg("forge-installer.jar")
+                    .arg("--installServer"),
             )
             .stdout(Stdio::null())
             .stdin(Stdio::null())

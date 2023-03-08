@@ -357,7 +357,7 @@ pub async fn get_jre_url(version: &str) -> Option<(String, u64)> {
     };
 
     let major_java_version = {
-        let val = serde_json::Value::from_str(
+        let val = match serde_json::Value::from_str(
             client
                 .get(
                     serde_json::Value::from_str(
@@ -388,9 +388,13 @@ pub async fn get_jre_url(version: &str) -> Option<(String, u64)> {
                 .as_str(),
         )
         .ok()?
-        .get("javaVersion")?
-        .get("majorVersion")?
-        .as_u64()?;
+        .get("javaVersion") {
+            Some(java_version) => java_version
+                .get("majorVersion")?
+                .as_u64()?,
+            None => 8
+        };
+        
         // Ddoptium won't provide java 16 for some reason
         // updateing to 17 should be safe, and 17 is preferred since its LTS
         if val == 16 {
@@ -443,6 +447,7 @@ mod tests {
         assert_eq!(super::get_jre_url("1.18.2").await, Some(("https://api.adoptium.net/v3/binary/latest/17/ga/linux/x64/jre/hotspot/normal/eclipse".to_string(), 17)));
         assert_eq!(super::get_jre_url("21w44a").await, Some(("https://api.adoptium.net/v3/binary/latest/17/ga/linux/x64/jre/hotspot/normal/eclipse".to_string(), 17)));
         assert_eq!(super::get_jre_url("1.8.4").await, Some(("https://api.adoptium.net/v3/binary/latest/8/ga/linux/x64/jre/hotspot/normal/eclipse".to_string(), 8)));
+        assert_eq!(super::get_jre_url("1.6.4").await, Some(("https://api.adoptium.net/v3/binary/latest/8/ga/linux/x64/jre/hotspot/normal/eclipse".to_string(), 8)));
 
         assert_eq!(super::get_jre_url("1.8.4asdasd").await, None);
     }
