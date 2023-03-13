@@ -8,7 +8,7 @@ use crate::traits::t_player::{TPlayer, TPlayerManagement};
 use crate::Error;
 
 use super::configurable::ServerPropertySetting;
-use super::MinecraftInstance;
+use super::MinecraftJavaInstance;
 
 #[derive(Eq, Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -52,7 +52,7 @@ impl TPlayer for MinecraftPlayer {
 }
 
 #[async_trait]
-impl TPlayerManagement for MinecraftInstance {
+impl TPlayerManagement for MinecraftJavaInstance {
     async fn get_player_count(&self) -> Result<u32, Error> {
         Ok(self.players_manager.lock().await.count())
     }

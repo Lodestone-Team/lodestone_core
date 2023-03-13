@@ -5,7 +5,7 @@ use ts_rs::TS;
 
 use crate::error::{Error, ErrorKind};
 use crate::implementations::generic::player::GenericPlayer;
-use crate::minecraft::player::MinecraftPlayer;
+use crate::minecraft_java::player::MinecraftPlayer;
 use crate::traits::GameInstance;
 #[enum_dispatch::enum_dispatch]
 pub trait TPlayer {

@@ -12,9 +12,10 @@ use self::manifest::ConfigurableManifest;
 use self::manifest::ConfigurableValue;
 use crate::error::Error;
 use crate::error::ErrorKind;
-use crate::implementations::minecraft::Flavour;
+use crate::implementations::minecraft_java::Flavour;
 use crate::traits::GameInstance;
-use crate::traits::MinecraftInstance;
+use crate::traits::MinecraftJavaInstance;
+use crate::traits::MinecraftBedrockInstance;
 use crate::types::InstanceUuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -33,6 +34,7 @@ pub enum Game {
     MinecraftJava {
         variant: MinecraftVariant,
     },
+    MinecraftBedrock { },
     Generic {
         game_name: GameType,       //used for identifying the "game" ("Minecraft")
         game_display_name: String, //displaying to the user what on earth this is ("MinecraftGlowstone")

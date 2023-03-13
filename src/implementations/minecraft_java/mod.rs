@@ -155,7 +155,7 @@ pub struct RestoreConfig {
 }
 
 #[derive(Clone)]
-pub struct MinecraftInstance {
+pub struct MinecraftJavaInstance {
     config: RestoreConfig,
     uuid: InstanceUuid,
     creation_time: i64,
@@ -195,14 +195,14 @@ enum BackupInstruction {
 
 #[tokio::test]
 async fn test_setup_manifest() {
-    let manifest = MinecraftInstance::setup_manifest(&FlavourKind::Fabric)
+    let manifest = MinecraftJavaInstance::setup_manifest(&FlavourKind::Fabric)
         .await
         .unwrap();
     let manifest_json_string = serde_json::to_string_pretty(&manifest).unwrap();
     println!("{manifest_json_string}");
 }
 
-impl MinecraftInstance {
+impl MinecraftJavaInstance {
     pub async fn setup_manifest(flavour: &FlavourKind) -> Result<ConfigurableManifest, Error> {
         let versions = match flavour {
             FlavourKind::Vanilla => get_vanilla_minecraft_versions().await,
@@ -472,7 +472,7 @@ impl MinecraftInstance {
         progression_event_id: Snowflake,
         event_broadcaster: Sender<Event>,
         macro_executor: MacroExecutor,
-    ) -> Result<MinecraftInstance, Error> {
+    ) -> Result<MinecraftJavaInstance, Error> {
         let path_to_config = path_to_instance.join(".lodestone_minecraft_config.json");
         let path_to_eula = path_to_instance.join("eula.txt");
         let path_to_macros = path_to_instance.join("macros");
@@ -758,7 +758,7 @@ impl MinecraftInstance {
             "Failed to write config file at {}",
             &path_to_config.display()
         ))?;
-        MinecraftInstance::restore(
+        MinecraftJavaInstance::restore(
             path_to_instance,
             dot_lodestone_config,
             uuid,
@@ -774,7 +774,7 @@ impl MinecraftInstance {
         instance_uuid: InstanceUuid,
         event_broadcaster: Sender<Event>,
         _macro_executor: MacroExecutor,
-    ) -> Result<MinecraftInstance, Error> {
+    ) -> Result<MinecraftJavaInstance, Error> {
         let path_to_config = path_to_instance.join(".lodestone_minecraft_config.json");
         let restore_config: RestoreConfig =
             serde_json::from_reader(std::fs::File::open(&path_to_config).context(format!(
@@ -896,7 +896,7 @@ impl MinecraftInstance {
             java_path.to_string_lossy().to_string(),
         )));
 
-        let mut instance = MinecraftInstance {
+        let mut instance = MinecraftJavaInstance {
             state: Arc::new(Mutex::new(State::Stopped)),
             uuid: instance_uuid.clone(),
             creation_time: dot_lodestone_config.creation_time(),
@@ -1010,4 +1010,4 @@ impl MinecraftInstance {
     }
 }
 
-impl TInstance for MinecraftInstance {}
+impl TInstance for MinecraftJavaInstance {}

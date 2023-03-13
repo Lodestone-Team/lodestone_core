@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::traits::t_configurable::GameType;
 use crate::{
-    implementations::minecraft::Flavour,
+    implementations::minecraft_java::Flavour,
     migration::RestoreConfigV042,
     prelude::{SNOWFLAKE_GENERATOR, VERSION},
 };

@@ -28,7 +28,8 @@ use error::Error;
 use events::{CausedBy, Event};
 use futures::Future;
 use global_settings::GlobalSettings;
-use implementations::minecraft;
+use implementations::minecraft_java;
+use implementations::minecraft_bedrock;
 use macro_executor::MacroExecutor;
 use port_manager::PortManager;
 use prelude::GameInstance;
@@ -124,7 +125,7 @@ async fn restore_instances(
             .unwrap();
 
             if let GameType::MinecraftJava = dot_lodestone_config.game_type() {
-                let instance = minecraft::MinecraftInstance::restore(
+                let instance = minecraft_java::MinecraftJavaInstance::restore(
                     path.to_owned(),
                     dot_lodestone_config.clone(),
                     dot_lodestone_config.uuid().to_owned(),

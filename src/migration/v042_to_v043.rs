@@ -3,7 +3,7 @@ use std::path::Path;
 use color_eyre::eyre::Context;
 use serde_json::json;
 
-use crate::{error::Error, implementations::minecraft::RestoreConfig};
+use crate::{error::Error, implementations::minecraft_java::RestoreConfig};
 
 use super::RestoreConfigV042;
 

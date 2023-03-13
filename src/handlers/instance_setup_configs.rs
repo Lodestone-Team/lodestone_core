@@ -1,6 +1,6 @@
 use crate::error::Error;
-use crate::implementations::minecraft;
-use crate::minecraft::FlavourKind;
+use crate::implementations::minecraft_java;
+use crate::minecraft_java::FlavourKind;
 use crate::traits::t_configurable::manifest::ConfigurableManifest;
 use crate::traits::t_configurable::manifest::SectionManifestValue;
 use crate::traits::t_configurable::GameType;
@@ -17,18 +17,20 @@ use ts_rs::TS;
 #[ts(export)]
 pub enum HandlerGameType {
     MinecraftJavaVanilla,
-    MinecraftFabric,
-    MinecraftForge,
-    MinecraftPaper,
+    MinecraftJavaFabric,
+    MinecraftJavaForge,
+    MinecraftJavaPaper,
+    MinecraftBedrock,
 }
 
 impl From<HandlerGameType> for GameType {
     fn from(value: HandlerGameType) -> Self {
         match value {
             HandlerGameType::MinecraftJavaVanilla => Self::MinecraftJava,
-            HandlerGameType::MinecraftFabric => Self::MinecraftJava,
-            HandlerGameType::MinecraftForge => Self::MinecraftJava,
-            HandlerGameType::MinecraftPaper => Self::MinecraftJava,
+            HandlerGameType::MinecraftJavaFabric => Self::MinecraftJava,
+            HandlerGameType::MinecraftJavaForge => Self::MinecraftJava,
+            HandlerGameType::MinecraftJavaPaper => Self::MinecraftJava,
+            HandlerGameType::MinecraftBedrock => Self::MinecraftBedrock,
         }
     }
 }
@@ -37,9 +39,10 @@ impl From<HandlerGameType> for FlavourKind {
     fn from(value: HandlerGameType) -> Self {
         match value {
             HandlerGameType::MinecraftJavaVanilla => Self::Vanilla,
-            HandlerGameType::MinecraftFabric => Self::Fabric,
-            HandlerGameType::MinecraftForge => Self::Forge,
-            HandlerGameType::MinecraftPaper => Self::Paper,
+            HandlerGameType::MinecraftJavaFabric => Self::Fabric,
+            HandlerGameType::MinecraftJavaForge => Self::Forge,
+            HandlerGameType::MinecraftJavaPaper => Self::Paper,
+            _ => Self::Vanilla, // not sure what pattern works best here
         }
     }
 }
@@ -47,9 +50,10 @@ impl From<HandlerGameType> for FlavourKind {
 pub async fn get_available_games() -> Json<Vec<HandlerGameType>> {
     Json(vec![
         HandlerGameType::MinecraftJavaVanilla,
-        HandlerGameType::MinecraftFabric,
-        HandlerGameType::MinecraftForge,
-        HandlerGameType::MinecraftPaper,
+        HandlerGameType::MinecraftJavaFabric,
+        HandlerGameType::MinecraftJavaForge,
+        HandlerGameType::MinecraftJavaPaper,
+        HandlerGameType::MinecraftBedrock,
     ])
 }
 
@@ -57,7 +61,7 @@ pub async fn get_setup_manifest(
     Path(game_type): Path<HandlerGameType>,
 ) -> Result<Json<ConfigurableManifest>, Error> {
     Ok(Json(
-        minecraft::MinecraftInstance::setup_manifest(&game_type.into()).await?,
+        minecraft_java::MinecraftJavaInstance::setup_manifest(&game_type.into()).await?,
     ))
 }
 
@@ -66,7 +70,7 @@ pub async fn validate_section(
     Json(section): Json<SectionManifestValue>,
 ) -> Result<Json<()>, Error> {
     Ok(Json(
-        minecraft::MinecraftInstance::validate_section(&game_type.into(), &section_id, &section)
+        minecraft_java::MinecraftJavaInstance::validate_section(&game_type.into(), &section_id, &section)
             .await?,
     ))
 }

@@ -10,8 +10,8 @@ use tokio::process::Command;
 
 use crate::error::{Error, ErrorKind};
 use crate::events::{CausedBy, Event, EventInner, InstanceEvent, InstanceEventInner};
-use crate::implementations::minecraft::player::MinecraftPlayer;
-use crate::implementations::minecraft::util::{name_to_uuid, read_properties_from_path};
+use crate::implementations::minecraft_java::player::MinecraftPlayer;
+use crate::implementations::minecraft_java::util::{name_to_uuid, read_properties_from_path};
 use crate::prelude::LODESTONE_PATH;
 use crate::traits::t_configurable::TConfigurable;
 use crate::traits::t_macro::TMacro;
@@ -21,11 +21,11 @@ use crate::types::Snowflake;
 use crate::util::dont_spawn_terminal;
 
 use super::r#macro::{resolve_macro_invocation, MinecraftMainWorkerGenerator};
-use super::{Flavour, ForgeBuildVersion, MinecraftInstance};
+use super::{Flavour, ForgeBuildVersion, MinecraftJavaInstance};
 use tracing::{debug, error, info, warn};
 
 #[async_trait::async_trait]
-impl TServer for MinecraftInstance {
+impl TServer for MinecraftJavaInstance {
     async fn start(&mut self, cause_by: CausedBy, block: bool) -> Result<(), Error> {
         self.state.lock().await.try_transition(
             StateAction::UserStart,
@@ -115,7 +115,7 @@ impl TServer for MinecraftInstance {
                     self.path_to_instance
                         .join("libraries")
                         .join("net")
-                        .join("minecraftforge")
+                        .join("MinecraftJavaForge")
                         .join("forge")
                         .join(format!(
                             "{}-{}",

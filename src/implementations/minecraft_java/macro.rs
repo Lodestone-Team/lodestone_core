@@ -19,25 +19,25 @@ use crate::{
     util::list_dir,
 };
 
-use super::MinecraftInstance;
+use super::MinecraftJavaInstance;
 
 #[op]
 async fn send_stdin(state: Rc<RefCell<OpState>>, cmd: String) -> Result<(), anyhow::Error> {
-    let instance = state.borrow().borrow::<MinecraftInstance>().clone();
+    let instance = state.borrow().borrow::<MinecraftJavaInstance>().clone();
     instance.send_command(&cmd, CausedBy::Unknown).await?;
     Ok(())
 }
 
 #[op]
 async fn send_rcon(state: Rc<RefCell<OpState>>, cmd: String) -> Result<String, anyhow::Error> {
-    let instance = state.borrow().borrow::<MinecraftInstance>().clone();
+    let instance = state.borrow().borrow::<MinecraftJavaInstance>().clone();
     let ret = instance.send_rcon(&cmd).await?;
     Ok(ret)
 }
 
 #[op]
 fn config(state: Rc<RefCell<OpState>>) -> Result<String, anyhow::Error> {
-    let instance = state.borrow().borrow::<MinecraftInstance>().clone();
+    let instance = state.borrow().borrow::<MinecraftJavaInstance>().clone();
     Ok(serde_json::to_string(&instance.config)?)
 }
 
@@ -46,7 +46,7 @@ async fn on_event(
     state: Rc<RefCell<OpState>>,
     event: String,
 ) -> Result<Option<String>, anyhow::Error> {
-    let instance = state.borrow().borrow::<MinecraftInstance>().clone();
+    let instance = state.borrow().borrow::<MinecraftJavaInstance>().clone();
     let mut event_rx = instance.event_broadcaster.subscribe();
     if event == "playerMessage" {
         while let Ok(event) = event_rx.recv().await {
@@ -161,11 +161,11 @@ pub fn resolve_macro_invocation(
 }
 
 pub struct MinecraftMainWorkerGenerator {
-    instance: MinecraftInstance,
+    instance: MinecraftJavaInstance,
 }
 
 impl MinecraftMainWorkerGenerator {
-    pub fn new(instance: MinecraftInstance) -> Self {
+    pub fn new(instance: MinecraftJavaInstance) -> Self {
         Self { instance }
     }
 }
@@ -227,7 +227,7 @@ impl MainWorkerGenerator for MinecraftMainWorkerGenerator {
 }
 
 #[async_trait]
-impl TMacro for MinecraftInstance {
+impl TMacro for MinecraftJavaInstance {
     async fn get_macro_list(&self) -> Vec<String> {
         list_dir(&self.path_to_macros, Some(true))
             .await

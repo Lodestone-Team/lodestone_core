@@ -16,10 +16,10 @@ use crate::types::InstanceUuid;
 use crate::util::download_file;
 
 use super::util::{get_fabric_jar_url, get_paper_jar_url, get_vanilla_jar_url};
-use super::MinecraftInstance;
+use super::{MinecraftJavaInstance, Flavour};
 
 #[async_trait]
-impl TConfigurable for MinecraftInstance {
+impl TConfigurable for MinecraftJavaInstance {
     async fn uuid(&self) -> InstanceUuid {
         self.uuid.clone()
     }
@@ -119,7 +119,7 @@ impl TConfigurable for MinecraftInstance {
             return Ok(());
         }
         let (url, _) = match self.config.flavour {
-            super::Flavour::Vanilla => get_vanilla_jar_url(&version).await.ok_or_else(|| {
+            Flavour::Vanilla => get_vanilla_jar_url(&version).await.ok_or_else(|| {
                 let error_msg =
                     format!("Cannot get the vanilla jar version for version {}", version);
                 Error {
@@ -127,7 +127,7 @@ impl TConfigurable for MinecraftInstance {
                     source: eyre!(error_msg),
                 }
             })?,
-            super::Flavour::Fabric { .. } => get_fabric_jar_url(&version, &None, &None)
+            Flavour::Fabric { .. } => get_fabric_jar_url(&version, &None, &None)
                 .await
                 .ok_or_else(|| {
                     let error_msg =
@@ -137,7 +137,7 @@ impl TConfigurable for MinecraftInstance {
                         source: eyre!(error_msg),
                     }
                 })?,
-            super::Flavour::Paper { .. } => {
+            Flavour::Paper { .. } => {
                 get_paper_jar_url(&version, &None).await.ok_or_else(|| {
                     let error_msg =
                         format!("Cannot get the paper jar version for version {}", version);
@@ -147,8 +147,8 @@ impl TConfigurable for MinecraftInstance {
                     }
                 })?
             }
-            super::Flavour::Spigot => todo!(),
-            super::Flavour::Forge { .. } => {
+            Flavour::Spigot => todo!(),
+            Flavour::Forge { .. } => {
                 return Err(Error {
                     kind: ErrorKind::UnsupportedOperation,
                     source: eyre!("Changing versions is unsupported for forge servers"),

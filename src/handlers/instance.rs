@@ -12,15 +12,15 @@ use crate::events::{
     ProgressionStartValue,
 };
 
-use minecraft::FlavourKind;
+use minecraft_java::FlavourKind;
 
-use crate::implementations::minecraft::MinecraftInstance;
+use crate::implementations::minecraft_java::MinecraftJavaInstance;
 use crate::prelude::PATH_TO_INSTANCES;
 use crate::traits::t_configurable::manifest::ManifestValue;
 use crate::traits::{t_configurable::TConfigurable, t_server::TServer, InstanceInfo, TInstance};
 
 use crate::types::{DotLodestoneConfig, InstanceUuid, Snowflake};
-use crate::{implementations::minecraft, traits::t_server::State, AppState};
+use crate::{implementations::minecraft_java, traits::t_server::State, AppState};
 
 use super::instance_setup_configs::HandlerGameType;
 
@@ -82,12 +82,13 @@ pub async fn create_instance(
 
     let flavour = match game_type {
         HandlerGameType::MinecraftJavaVanilla => FlavourKind::Vanilla,
-        HandlerGameType::MinecraftForge => FlavourKind::Forge,
-        HandlerGameType::MinecraftFabric => FlavourKind::Fabric,
-        HandlerGameType::MinecraftPaper => FlavourKind::Paper,
+        HandlerGameType::MinecraftJavaForge => FlavourKind::Forge,
+        HandlerGameType::MinecraftJavaFabric => FlavourKind::Fabric,
+        HandlerGameType::MinecraftJavaPaper => FlavourKind::Paper,
+        _ => FlavourKind::Vanilla,
     };
 
-    let setup_config = MinecraftInstance::construct_setup_config(manifest_value, flavour).await?;
+    let setup_config = MinecraftJavaInstance::construct_setup_config(manifest_value, flavour).await?;
 
     let setup_path = PATH_TO_INSTANCES.with(|path| {
         path.join(format!(
@@ -144,7 +145,7 @@ pub async fn create_instance(
                 snowflake: Snowflake::default(),
                 caused_by: caused_by.clone(),
             });
-            let minecraft_instance = match minecraft::MinecraftInstance::new(
+            let minecraft_instance = match minecraft_java::MinecraftJavaInstance::new(
                 setup_config.clone(),
                 dot_lodestone_config,
                 setup_path.clone(),

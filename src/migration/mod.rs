@@ -6,7 +6,7 @@ use color_eyre::eyre::Context;
 
 use tracing::debug;
 
-use crate::{error::Error, implementations::minecraft::Flavour, types::InstanceUuid};
+use crate::{error::Error, implementations::minecraft_java::Flavour, types::InstanceUuid};
 
 #[derive(serde::Deserialize, Clone)]
 pub struct RestoreConfigV042 {
@@ -59,7 +59,7 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        implementations::minecraft::{Flavour, RestoreConfig},
+        implementations::minecraft_java::{Flavour, RestoreConfig},
         traits::t_configurable::GameType,
         types::DotLodestoneConfig,
     };

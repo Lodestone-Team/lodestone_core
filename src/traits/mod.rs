@@ -37,7 +37,8 @@ pub struct InstanceInfo {
     pub max_player_count: Option<u32>,
     pub player_list: Option<HashSet<Player>>,
 }
-use crate::minecraft::MinecraftInstance;
+use crate::minecraft_java::MinecraftJavaInstance;
+use crate::minecraft_bedrock::MinecraftBedrockInstance;
 use crate::prelude::GameInstance;
 use crate::types::InstanceUuid;
 #[async_trait]
