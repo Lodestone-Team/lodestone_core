@@ -27,6 +27,51 @@ use tracing::{debug, error, info, warn};
 #[async_trait]
 impl TServer for MinecraftBedrockInstance {
     async fn start(&mut self, cause_by: CausedBy, block: bool) -> Result<(), Error> {
+        self.state.lock().await.try_transition(
+            StateAction::UserStart,
+            Some(&|state| {
+                self.event_broadcaster.send(Event {
+                    event_inner: EventInner::InstanceEvent(InstanceEvent {
+                        instance_name: self.config.name.clone(),
+                        instance_uuid: self.uuid.clone(),
+                        instance_event_inner: InstanceEventInner::StateTransition { to: state },
+                    }),
+                    snowflake: Snowflake::default(),
+                    details: "Starting server".to_string(),
+                    caused_by: cause_by.clone(),
+                });
+            }),
+        )?;
+
+        if !port_scanner::local_port_available(self.config.port as u16) {
+            return Err(Error {
+                kind: ErrorKind::Internal,
+                source: eyre!("Port {} is already in use", self.config.port),
+            });
+        }
+
+        env::set_current_dir(&self.path_to_instance).context(
+            "Failed to set current directory to the instance's path, is the path valid?",
+        )?;
+
+        // skip prelaunch part
+
+        // write server_settings to server.properties
+        
+        let mut server_start_command = Command::new(self
+            .path_to_instance
+            .join("bedrock_server"));
+
+        match dont_spawn_terminal(&mut server_start_command)
+            .stdout(Stdio::piped())
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(mut proc) => {}
+            Err(e) => {}
+        }
+
         Ok(())
     }
 

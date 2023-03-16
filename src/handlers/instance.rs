@@ -81,12 +81,12 @@ pub async fn create_instance(
     let instance_uuid = instance_uuid;
 
     let flavour = match game_type {
-        HandlerGameType::MinecraftJavaVanilla => FlavourKind::Vanilla,
-        HandlerGameType::MinecraftJavaForge => FlavourKind::Forge,
-        HandlerGameType::MinecraftJavaFabric => FlavourKind::Fabric,
-        HandlerGameType::MinecraftJavaPaper => FlavourKind::Paper,
-        _ => FlavourKind::Vanilla,
-    };
+        HandlerGameType::MinecraftJavaVanilla => Some(FlavourKind::Vanilla),
+        HandlerGameType::MinecraftJavaForge => Some(FlavourKind::Forge),
+        HandlerGameType::MinecraftJavaFabric => Some(FlavourKind::Fabric),
+        HandlerGameType::MinecraftJavaPaper => Some(FlavourKind::Paper),
+        _ => None,
+    }.unwrap();
 
     let setup_config = MinecraftJavaInstance::construct_setup_config(manifest_value, flavour).await?;
 
