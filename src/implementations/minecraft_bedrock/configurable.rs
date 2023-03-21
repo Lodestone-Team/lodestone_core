@@ -25,22 +25,27 @@ impl TConfigurable for MinecraftBedrockInstance {
     }
 
     async fn name(&self) -> String {
-        self.config.name.clone()
+        self.config.lock().await.name.clone()
     }
 
     async fn game_type(&self) -> Game {
-        Game::MinecraftBedrock { }
+        Game::MinecraftBedrock{ }
     }
+
+    async fn version(&self) -> String {
+        self.config.lock().await.version.clone()
+    }
+
     async fn flavour(&self) -> String {
         String::from("Vanilla")
     }
 
     async fn description(&self) -> String {
-        self.config.description.clone()
+        self.config.lock().await.description.clone()
     }
 
     async fn port(&self) -> u32 {
-        self.config.port
+        self.config.lock().await.port
     }
 
     async fn creation_time(&self) -> i64 {
@@ -52,12 +57,13 @@ impl TConfigurable for MinecraftBedrockInstance {
     }
 
     async fn auto_start(&self) -> bool {
-        self.config.auto_start
+        self.config.lock().await.auto_start
     }
 
     async fn restart_on_crash(&self) -> bool {
-        self.config.restart_on_crash
+        self.config.lock().await.restart_on_crash
     }
+
     async fn set_name(&mut self, name: String) -> Result<(), Error> {
         if name.is_empty() {
             return Err(Error {
@@ -71,13 +77,13 @@ impl TConfigurable for MinecraftBedrockInstance {
                 source: eyre!("Name cannot be longer than 100 characters"),
             });
         }
-        self.config.name = name;
+        self.config.lock().await.name = name;
         self.write_config_to_file().await?;
         Ok(())
     }
 
     async fn set_description(&mut self, description: String) -> Result<(), Error> {
-        self.config.description = description;
+        self.config.lock().await.description = description;
         self.write_config_to_file().await?;
         Ok(())
     }

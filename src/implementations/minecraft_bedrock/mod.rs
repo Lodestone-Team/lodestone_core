@@ -5,6 +5,7 @@ pub mod resource;
 pub mod util;
 pub mod server;
 
+use crate::event_broadcaster::EventBroadcaster;
 use crate::traits::t_configurable::GameType;
 
 use async_trait::async_trait;
@@ -12,6 +13,7 @@ use color_eyre::eyre::{eyre, Context, ContextCompat};
 use enum_kinds::EnumKind;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -81,11 +83,11 @@ pub struct RestoreConfig {
 
 #[derive(Clone)]
 pub struct MinecraftBedrockInstance {
-    config: RestoreConfig,
+    config: Arc<Mutex<RestoreConfig>>,
     uuid: InstanceUuid,
     creation_time: i64,
     state: Arc<Mutex<State>>,
-    event_broadcaster: Sender<Event>,
+    event_broadcaster: EventBroadcaster,
 
     // file paths
     path_to_instance: PathBuf,
@@ -94,6 +96,7 @@ pub struct MinecraftBedrockInstance {
 
     // directory paths
     path_to_macros: PathBuf,
+    path_to_worlds: PathBuf,
 
     // variables which can be changed at runtime
     auto_start: Arc<AtomicBool>,
@@ -232,7 +235,13 @@ impl MinecraftBedrockInstance {
         sections.insert("section_1".to_string(), section_1);
         sections.insert("section_2".to_string(), section_2);
 
-        Ok(ConfigurableManifest::new(false, false, false, sections))
+        Ok(ConfigurableManifest::new(
+            String::from("Minecraft Bedrock Server"),
+            None,
+            false,
+            false,
+            sections,
+        ))
     }
 
     pub async fn validate_section(
@@ -315,13 +324,19 @@ impl MinecraftBedrockInstance {
             server_properties_section_manifest,
         );
 
-        ConfigurableManifest::new(false, false, false, setting_sections)
+        ConfigurableManifest::new(
+            restore_config.name.clone(),
+            Some(restore_config.description.clone()),
+            false,
+            false,
+            setting_sections,
+        )
     }
 
     async fn write_config_to_file(&self) -> Result<(), Error> {
         tokio::fs::write(
             &self.path_to_config,
-            to_string_pretty(&self.config)
+            to_string_pretty(&*self.config.lock().await)
                 .context("Failed to serialize config to string, this is a bug, please report it")?,
         )
         .await
@@ -348,7 +363,7 @@ impl MinecraftBedrockInstance {
         dot_lodestone_config: DotLodestoneConfig,
         path_to_instance: PathBuf,
         progression_event_id: Snowflake,
-        event_broadcaster: Sender<Event>,
+        event_broadcaster: EventBroadcaster,
         macro_executor: MacroExecutor,
     ) -> Result<(), Error> {
         // Step 2: Download server zip
@@ -503,7 +518,7 @@ impl MinecraftBedrockInstance {
         path_to_instance: PathBuf,
         dot_lodestone_config: DotLodestoneConfig,
         instance_uuid: InstanceUuid,
-        event_broadcaster: Sender<Event>,
+        event_broadcaster: EventBroadcaster,
         _macro_executor: MacroExecutor,
     ) -> Result<MinecraftBedrockInstance, Error> {
         let path_to_config = path_to_instance.join(".lodestone_minecraft_config.json");
@@ -516,6 +531,7 @@ impl MinecraftBedrockInstance {
                 "Failed to deserialize config from string. Was the config file modified manually?",
             )?;
         let path_to_macros = path_to_instance.join("macros");
+        let path_to_worlds = path_to_instance.join("worlds");
         let path_to_properties = path_to_instance.join("server.properties");
         // if the properties file doesn't exist, create it
         if !path_to_properties.exists() {
@@ -526,7 +542,90 @@ impl MinecraftBedrockInstance {
             .await
             .expect("failed to write to server.properties");
         };
+
         let state = Arc::new(Mutex::new(State::Stopped));
+        let (backup_tx, mut backup_rx): (
+            UnboundedSender<BackupInstruction>,
+            UnboundedReceiver<BackupInstruction>,
+        ) = tokio::sync::mpsc::unbounded_channel();
+        let _backup_task = tokio::spawn({
+            let backup_period = restore_config.backup_period;
+            let path_to_worlds = path_to_worlds.clone();
+            let path_to_instance = path_to_instance.clone();
+            let state = state.clone();
+            async move {
+                let backup_now = || async {
+                    debug!("Backing up instance");
+                    let backup_dir = &path_to_worlds.join("backup");
+                    tokio::fs::create_dir_all(&backup_dir).await.ok();
+                    // get current time in human readable format
+                    let time = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S");
+                    let backup_name = format!("backup-{}", time);
+                    let backup_path = backup_dir.join(&backup_name);
+                    if let Err(e) = tokio::task::spawn_blocking({
+                        let path_to_instance = path_to_instance.clone();
+                        let backup_path = backup_path.clone();
+                        let mut copy_option = fs_extra::dir::CopyOptions::new();
+                        copy_option.copy_inside = true;
+                        move || {
+                            fs_extra::dir::copy(
+                                path_to_instance.join("world"),
+                                &backup_path,
+                                &copy_option,
+                            )
+                        }
+                    })
+                    .await
+                    {
+                        error!("Failed to backup instance: {}", e);
+                    }
+                };
+                let mut backup_period = backup_period;
+                let mut counter = 0;
+                loop {
+                    tokio::select! {
+                           instruction = backup_rx.recv() => {
+                             if instruction.is_none() {
+                                 info!("Backup task exiting");
+                                 break;
+                             }
+                             let instruction = instruction.unwrap();
+                             match instruction {
+                             BackupInstruction::SetPeriod(new_period) => {
+                                 backup_period = new_period;
+                             },
+                             BackupInstruction::BackupNow => backup_now().await,
+                             BackupInstruction::Pause => {
+                                     loop {
+                                         if let Some(BackupInstruction::Resume) = backup_rx.recv().await {
+                                             break;
+                                         } else {
+                                             continue
+                                         }
+                                     }
+
+                             },
+                             BackupInstruction::Resume => {
+                                 continue;
+                             },
+                             }
+                           }
+                           _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                             if let Some(period) = backup_period {
+                                 if *state.lock().await == State::Running {
+                                     debug!("counter is {}", counter);
+                                     counter += 1;
+                                     if counter >= period {
+                                         counter = 0;
+                                         backup_now().await;
+                                     }
+                                 }
+                             }
+                           }
+                    }
+                }
+            }
+        });
 
 
         let configurable_manifest = Arc::new(Mutex::new(Self::init_configurable_manifest(
@@ -544,11 +643,12 @@ impl MinecraftBedrockInstance {
             //     event_broadcaster.clone(),
             //     instance_uuid,
             // ))),
-            config: restore_config,
+            config: Arc::new(Mutex::new(restore_config)),
             path_to_instance,
             path_to_config,
             path_to_properties,
             path_to_macros,
+            path_to_worlds,
             macro_executor: MacroExecutor::new(event_broadcaster.clone()),
             event_broadcaster,
             process: Arc::new(Mutex::new(None)),
@@ -585,7 +685,7 @@ async fn test_setup_server() {
         GameType::MinecraftBedrock,
     );
 
-    let (event_broadcaster, _) = broadcast::channel(10);
+    let (event_broadcaster, _) = EventBroadcaster::new(10);
     let macro_executor = MacroExecutor::new(event_broadcaster.clone());
         // config: SetupConfig,
         // dot_lodestone_config: DotLodestoneConfig,

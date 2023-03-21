@@ -4,12 +4,13 @@ use argon2::{Argon2, PasswordVerifier};
 use color_eyre::eyre::{eyre, Context};
 use jsonwebtoken::{Algorithm, Validation};
 use serde::{Deserialize, Serialize};
-use tokio::{io::AsyncWriteExt, sync::broadcast::Sender};
+use tokio::io::AsyncWriteExt;
 use tracing::warn;
 use ts_rs::TS;
 
 use crate::{
     error::{Error, ErrorKind},
+    event_broadcaster::EventBroadcaster,
     events::{CausedBy, Event, EventInner, UserEvent, UserEventInner},
     types::{InstanceUuid, Snowflake},
 };
@@ -319,14 +320,14 @@ impl From<User> for PublicUser {
 
 #[derive(Clone)]
 pub struct UsersManager {
-    event_broadcaster: Sender<Event>,
+    event_broadcaster: EventBroadcaster,
     users: HashMap<UserId, User>,
     path_to_users: PathBuf,
 }
 
 impl UsersManager {
     pub fn new(
-        event_broadcaster: Sender<Event>,
+        event_broadcaster: EventBroadcaster,
         users: HashMap<UserId, User>,
         path_to_users: PathBuf,
     ) -> Self {
@@ -490,6 +491,53 @@ impl UsersManager {
                 }
                 Err(e)
             }
+        }
+    }
+
+    pub async fn rename_user(
+        &mut self,
+        uid: impl AsRef<UserId>,
+        new_username: String,
+        caused_by: CausedBy,
+    ) -> Result<(), Error> {
+        let old_username = self
+            .users
+            .get_mut(uid.as_ref())
+            .ok_or_else(|| Error {
+                kind: ErrorKind::NotFound,
+                source: eyre!("User id not found"),
+            })?
+            .username
+            .clone();
+        if let Some(user) = self.users.get_mut(uid.as_ref()) {
+            user.username = new_username.clone();
+            match self.write_to_file().await {
+                Ok(_) => {
+                    self.event_broadcaster.send(Event {
+                        event_inner: EventInner::UserEvent(UserEvent {
+                            user_id: uid.as_ref().to_owned(),
+                            user_event_inner: UserEventInner::UsernameChanged {
+                                new_username: new_username.clone(),
+                            },
+                        }),
+                        details: "".to_string(),
+                        snowflake: Snowflake::default(),
+                        caused_by,
+                    });
+                    Ok(())
+                }
+                Err(e) => {
+                    if let Some(user) = self.users.get_mut(uid.as_ref()) {
+                        user.username = old_username
+                    }
+                    Err(e)
+                }
+            }
+        } else {
+            Err(Error {
+                kind: ErrorKind::NotFound,
+                source: eyre!("User id not found"),
+            })
         }
     }
 
@@ -670,7 +718,7 @@ mod tests {
         use super::*;
         // create a temporary folder
         let temp_dir = tempdir::TempDir::new("test_login").unwrap().into_path();
-        let (tx, _rx) = tokio::sync::broadcast::channel(10);
+        let (tx, _rx) = EventBroadcaster::new(10);
         let mut users_manager =
             UsersManager::new(tx.clone(), HashMap::new(), temp_dir.join("users.json"));
         let test_user1 = User::new(
@@ -694,7 +742,7 @@ mod tests {
         use super::*;
         // create a temporary folder
         let temp_dir = tempdir::TempDir::new("test_login").unwrap().into_path();
-        let (tx, _rx) = tokio::sync::broadcast::channel(10);
+        let (tx, _rx) = EventBroadcaster::new(10);
         let mut users_manager =
             UsersManager::new(tx.clone(), HashMap::new(), temp_dir.join("users.json"));
         let test_user1 = User::new(
@@ -730,7 +778,7 @@ mod tests {
         use super::*;
         // create a temporary folder
         let temp_dir = tempdir::TempDir::new("test_login").unwrap().into_path();
-        let (tx, _rx) = tokio::sync::broadcast::channel(10);
+        let (tx, _rx) = EventBroadcaster::new(10);
         let mut users_manager =
             UsersManager::new(tx.clone(), HashMap::new(), temp_dir.join("users.json"));
         let test_user1 = User::new(
@@ -771,7 +819,7 @@ mod tests {
 
         drop(users_manager);
 
-        let (tx, _rx) = tokio::sync::broadcast::channel(10);
+        let (tx, _rx) = EventBroadcaster::new(10);
 
         let mut users_manager = UsersManager::new(tx, HashMap::new(), temp_dir.join("users.json"));
 

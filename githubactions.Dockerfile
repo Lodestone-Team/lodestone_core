@@ -1,27 +1,22 @@
-FROM rust as build
-
-# create and enter app directory
-WORKDIR /app
-
-# copy over project files
-COPY . ./
-
-# build app using 'release' profile
-RUN cargo build --release --features "vendored-openssl"
-
+# syntax=docker/dockerfile:1
 FROM debian:bullseye-slim as production
+
+ARG binpath=./release/main
 
 #
 RUN apt-get update \
-  && apt-get install -y ca-certificates \
+  && apt-get install -y ca-certificates libssl-dev libsasl2-dev \
   && update-ca-certificates \
   && rm -rf /var/lib/apt/lists/*
+
+RUN ldconfig
+
+RUN echo $LD_LIBRARY_PATH
 
 # create and enter app directory
 WORKDIR /app
 
-# copy over built app
-COPY --from=build /app/target/release/main ./
+COPY $binpath ./main
 
 # specify default port
 EXPOSE 16662

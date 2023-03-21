@@ -73,12 +73,34 @@
 
 Follow the instruction on our [Github page](https://github.com/Lodestone-Team#installation)
 
+### Using Docker Image
+
+As of v0.4.3 we have added Docker support to lodestone core.
+Our precompiled images will be based on the newest release available from: `ghcr.io/lodestone-team/lodestone_core`.
+Alternatively, you may build your own image using the default `Dockerfile`, not additional arguments required.
+
+> **Note**
+> You may add additional ports as you wish to forward, but 16662 is the default port served in the image.
+> You may add a volume for your lodestone instance to be accessible, in the example below, you can create a volume first by using `docker volume create lodestone`.
+
+To use:
+```sh
+docker run -d \
+  --name lodestone \
+  --restart unless-stopped \
+  -p 16662:16662 \
+  -v lodestone:/root/.lodestone \
+  ghcr.io/Lodestone-Team/lodestone_core
+```
+
 <!-- GETTING STARTED -->
 ## Getting Started (development)
 
 Please make sure you have `cargo` and `rustc`, for instruction on how to install the Rust toolchain, see here: [rustup.rs](https://rustup.rs/).
 
 ### Prerequisites
+
+These instructions apply to Ubuntu 20.04 LTS and later.
 
 * `build-essential` is required for the Rust toolchain.
   ```sh
@@ -90,7 +112,11 @@ Please make sure you have `cargo` and `rustc`, for instruction on how to install
   ```
 * `cpuidtool` is required to query CPU information
   ```sh
-  sudo apt-get install cpuidtool libcpuid14 libcpuid-dev
+  sudo apt-get install cpuidtool libcpuid-dev
+  ```
+  A few other packages are needed to compile Lodestone
+  ```sh
+  sudo apt-get install libffi-dev libmagic-dev file
   ```
 
 ### Installation

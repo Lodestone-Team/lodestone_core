@@ -27,12 +27,13 @@ use tracing::{debug, error, info, warn};
 #[async_trait]
 impl TServer for MinecraftBedrockInstance {
     async fn start(&mut self, cause_by: CausedBy, block: bool) -> Result<(), Error> {
+        let config = self.config.lock().await.clone();
         self.state.lock().await.try_transition(
             StateAction::UserStart,
             Some(&|state| {
                 self.event_broadcaster.send(Event {
                     event_inner: EventInner::InstanceEvent(InstanceEvent {
-                        instance_name: self.config.name.clone(),
+                        instance_name: config.name.clone(),
                         instance_uuid: self.uuid.clone(),
                         instance_event_inner: InstanceEventInner::StateTransition { to: state },
                     }),
@@ -43,10 +44,10 @@ impl TServer for MinecraftBedrockInstance {
             }),
         )?;
 
-        if !port_scanner::local_port_available(self.config.port as u16) {
+        if !port_scanner::local_port_available(config.port as u16) {
             return Err(Error {
                 kind: ErrorKind::Internal,
-                source: eyre!("Port {} is already in use", self.config.port),
+                source: eyre!("Port {} is already in use", config.port),
             });
         }
 
@@ -68,7 +69,32 @@ impl TServer for MinecraftBedrockInstance {
             .stderr(Stdio::piped())
             .spawn()
         {
-            Ok(mut proc) => {}
+            Ok(mut proc) => {
+                let stdin = proc.stdin.take().ok_or_else(|| {
+                    error!(
+                        "[{}] Failed to take stdin during startup",
+                        config.name.clone()
+                    );
+                    eyre!("Failed to take stdin during startup")
+                })?;
+                self.stdin.lock().await.replace(stdin);
+                let stdout = proc.stdout.take().ok_or_else(|| {
+                    error!(
+                        "[{}] Failed to take stdout during startup",
+                        config.name.clone()
+                    );
+                    eyre!("Failed to take stdout during startup")
+                })?;
+                let stderr = proc.stderr.take().ok_or_else(|| {
+                    error!(
+                        "[{}] Failed to take stderr during startup",
+                        config.name.clone()
+                    );
+                    eyre!("Failed to take stderr during startup")
+                })?;
+                *self.process.lock().await = Some(proc);
+
+            }
             Err(e) => {}
         }
 

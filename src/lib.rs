@@ -1,5 +1,6 @@
 #![allow(clippy::comparison_chain, clippy::type_complexity)]
 
+use crate::event_broadcaster::EventBroadcaster;
 use crate::traits::t_configurable::GameType;
 use crate::{
     db::write::write_event_to_db_task,
@@ -51,10 +52,7 @@ use tokio::{
     fs::create_dir_all,
     process::Command,
     select,
-    sync::{
-        broadcast::{self, error::RecvError, Receiver, Sender},
-        Mutex, RwLock,
-    },
+    sync::{broadcast::error::RecvError, Mutex, RwLock},
 };
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -72,6 +70,7 @@ use uuid::Uuid;
 pub mod auth;
 pub mod db;
 pub mod error;
+mod event_broadcaster;
 mod events;
 pub mod global_settings;
 mod handlers;
@@ -93,7 +92,7 @@ pub struct AppState {
     events_buffer: Arc<Mutex<AllocRingBuffer<Event>>>,
     console_out_buffer: Arc<Mutex<HashMap<InstanceUuid, AllocRingBuffer<Event>>>>,
     monitor_buffer: Arc<Mutex<HashMap<InstanceUuid, AllocRingBuffer<MonitorReport>>>>,
-    event_broadcaster: Sender<Event>,
+    event_broadcaster: EventBroadcaster,
     uuid: String,
     up_since: i64,
     global_settings: Arc<Mutex<GlobalSettings>>,
@@ -106,7 +105,7 @@ pub struct AppState {
 }
 async fn restore_instances(
     lodestone_path: &Path,
-    event_broadcaster: &Sender<Event>,
+    event_broadcaster: EventBroadcaster,
     macro_executor: MacroExecutor,
 ) -> HashMap<InstanceUuid, GameInstance> {
     let mut ret: HashMap<InstanceUuid, GameInstance> = HashMap::new();
@@ -123,6 +122,7 @@ async fn restore_instances(
                 std::fs::File::open(path.join(".lodestone_config")).unwrap(),
             )
             .unwrap();
+            debug!("restoring instance: {}", path.display());
 
             if let GameType::MinecraftJava = dot_lodestone_config.game_type() {
                 let instance = minecraft_java::MinecraftJavaInstance::restore(
@@ -134,7 +134,7 @@ async fn restore_instances(
                 )
                 .await
                 .unwrap();
-                debug!("restored instance: {}", instance.name().await);
+                debug!("Restored successfully");
                 ret.insert(dot_lodestone_config.uuid().to_owned(), instance.into());
             }
         }
@@ -308,7 +308,7 @@ pub async fn run() -> (
 
     download_dependencies().await.unwrap();
 
-    let (tx, _rx): (Sender<Event>, Receiver<Event>) = broadcast::channel(256);
+    let (tx, _rx) = EventBroadcaster::new(512);
 
     let mut users_manager = UsersManager::new(
         tx.clone(),
@@ -342,7 +342,8 @@ pub async fn run() -> (
         None
     };
     let macro_executor = MacroExecutor::new(tx.clone());
-    let mut instances = restore_instances(&lodestone_path, &tx, macro_executor.clone()).await;
+    let mut instances =
+        restore_instances(&lodestone_path, tx.clone(), macro_executor.clone()).await;
     for (_, instance) in instances.iter_mut() {
         if instance.auto_start().await {
             info!("Auto starting instance {}", instance.name().await);
@@ -487,13 +488,25 @@ pub async fn run() -> (
                     .layer(cors)
                     .layer(trace);
                 let app = Router::new().nest("/api/v1", api_routes);
-                let addr = SocketAddr::from(([0, 0, 0, 0], 16_662));
+                #[allow(unused_variables, unused_mut)]
+                let mut port = 16_662_u16;
+                #[cfg(not(debug_assertions))]
+                if port_scanner::scan_port(port) {
+                    error!("Port {port} is already in use, exiting");
+                    std::process::exit(1);
+                }
+                #[cfg(debug_assertions)]
+                while port_scanner::scan_port(port) {
+                    debug!("Port {port} is already in use, trying next port");
+                    port += 1;
+                }
+                let addr = SocketAddr::from(([0, 0, 0, 0], port));
                 select! {
                     _ = write_to_db_task => info!("Write to db task exited"),
                     _ = event_buffer_task => info!("Event buffer task exited"),
                     _ = monitor_report_task => info!("Monitor report task exited"),
                     _ = {
-                        info!("Web server live on {}", addr);
+                        info!("Web server live on {addr}");
                         async {
                             match tls_config_result {
                                 Ok(config) => {
@@ -511,7 +524,7 @@ pub async fn run() -> (
                 // cleanup
                 let mut instances = shared_state.instances.lock().await;
                 for (_, instance) in instances.iter_mut() {
-                    instance.stop(CausedBy::System, true).await;
+                    let _ = instance.stop(CausedBy::System, true);
                 }
             }
         },

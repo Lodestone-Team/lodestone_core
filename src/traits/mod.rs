@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use ts_rs::TS;
 
-use self::t_player::Player;
 use self::t_configurable::Game;
+use self::t_player::Player;
 use self::t_server::State;
 use self::{
     t_configurable::TConfigurable, t_macro::TMacro, t_player::TPlayerManagement,
@@ -27,6 +27,7 @@ pub struct InstanceInfo {
     pub name: String,
     pub game_type: Game,
     pub description: String,
+    pub version: String,
     pub port: u32,
     pub creation_time: i64,
     pub path: String,
@@ -52,6 +53,7 @@ pub trait TInstance:
             name: self.name().await,
             game_type: self.game_type().await,
             description: self.description().await,
+            version: self.version().await,
             port: self.port().await,
             creation_time: self.creation_time().await,
             path: self.path().await.display().to_string(),

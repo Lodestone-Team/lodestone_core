@@ -14,7 +14,7 @@ pub mod versions;
 use color_eyre::eyre::{eyre, Context, ContextCompat};
 use enum_kinds::EnumKind;
 use indexmap::IndexMap;
-use std::collections::BTreeMap;
+
 use std::process::Stdio;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ use tokio::sync::Mutex;
 
 use ::serde::{Deserialize, Serialize};
 use serde_json::to_string_pretty;
-use tokio::sync::broadcast::Sender;
+
 use tracing::{debug, error, info};
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -35,6 +35,7 @@ use tokio::{self};
 use ts_rs::TS;
 
 use crate::error::Error;
+use crate::event_broadcaster::EventBroadcaster;
 use crate::events::{CausedBy, Event, EventInner, ProgressionEvent, ProgressionEventInner};
 use crate::macro_executor::MacroExecutor;
 use crate::prelude::PATH_TO_BINARIES;
@@ -122,6 +123,18 @@ impl ToString for Flavour {
     }
 }
 
+impl ToString for FlavourKind {
+    fn to_string(&self) -> String {
+        match self {
+            FlavourKind::Vanilla => "vanilla".to_string(),
+            FlavourKind::Fabric => "fabric".to_string(),
+            FlavourKind::Paper => "paper".to_string(),
+            FlavourKind::Spigot => "spigot".to_string(),
+            FlavourKind::Forge => "forge".to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SetupConfig {
     pub name: String,
@@ -144,6 +157,7 @@ pub struct RestoreConfig {
     pub flavour: Flavour,
     pub description: String,
     pub cmd_args: Vec<String>,
+    pub java_cmd: Option<String>,
     pub port: u32,
     pub min_ram: u32,
     pub max_ram: u32,
@@ -156,11 +170,11 @@ pub struct RestoreConfig {
 
 #[derive(Clone)]
 pub struct MinecraftJavaInstance {
-    config: RestoreConfig,
+    config: Arc<Mutex<RestoreConfig>>,
     uuid: InstanceUuid,
     creation_time: i64,
     state: Arc<Mutex<State>>,
-    event_broadcaster: Sender<Event>,
+    event_broadcaster: EventBroadcaster,
     // file paths
     path_to_instance: PathBuf,
     path_to_config: PathBuf,
@@ -324,7 +338,13 @@ impl MinecraftJavaInstance {
         sections.insert("section_1".to_string(), section_1);
         sections.insert("section_2".to_string(), section_2);
 
-        Ok(ConfigurableManifest::new(false, false, false, sections))
+        Ok(ConfigurableManifest::new(
+            format!("{} Server", flavour.to_string()),
+            None,
+            false,
+            false,
+            sections,
+        ))
     }
 
     pub async fn validate_section(
@@ -462,7 +482,13 @@ impl MinecraftJavaInstance {
             server_properties_section_manifest,
         );
 
-        ConfigurableManifest::new(false, false, false, setting_sections)
+        ConfigurableManifest::new(
+            restore_config.name.clone(),
+            Some(restore_config.description.clone()),
+            false,
+            false,
+            setting_sections,
+        )
     }
 
     pub async fn new(
@@ -470,7 +496,7 @@ impl MinecraftJavaInstance {
         dot_lodestone_config: DotLodestoneConfig,
         path_to_instance: PathBuf,
         progression_event_id: Snowflake,
-        event_broadcaster: Sender<Event>,
+        event_broadcaster: EventBroadcaster,
         macro_executor: MacroExecutor,
     ) -> Result<MinecraftJavaInstance, Error> {
         let path_to_config = path_to_instance.join(".lodestone_minecraft_config.json");
@@ -483,7 +509,7 @@ impl MinecraftJavaInstance {
         let uuid = dot_lodestone_config.uuid().to_owned();
 
         // Step 1: Create Directories
-        let _ = event_broadcaster.send(Event {
+        event_broadcaster.send(Event {
             event_inner: EventInner::ProgressionEvent(ProgressionEvent {
                 event_id: progression_event_id,
                 progression_event_inner: ProgressionEventInner::ProgressionUpdate {
@@ -531,7 +557,7 @@ impl MinecraftJavaInstance {
                     let progression_event_id = progression_event_id;
                     &move |dl| {
                         if let Some(total) = dl.total {
-                            let _ = event_broadcaster.send(Event {
+                            event_broadcaster.send(Event {
                                 event_inner: EventInner::ProgressionEvent(ProgressionEvent {
                                     event_id: progression_event_id,
                                     progression_event_inner:
@@ -581,7 +607,7 @@ impl MinecraftJavaInstance {
                 unzipped_content.iter().last().unwrap().display()
             ))?;
         } else {
-            let _ = event_broadcaster.send(Event {
+            event_broadcaster.send(Event {
                 event_inner: EventInner::ProgressionEvent(ProgressionEvent {
                     event_id: progression_event_id,
                     progression_event_inner: ProgressionEventInner::ProgressionUpdate {
@@ -622,7 +648,7 @@ impl MinecraftJavaInstance {
                 let progression_event_id = progression_event_id;
                 &move |dl| {
                     if let Some(total) = dl.total {
-                        let _ = event_broadcaster.send(Event {
+                        event_broadcaster.send(Event {
                             event_inner: EventInner::ProgressionEvent(ProgressionEvent {
                                 event_id: progression_event_id,
                                 progression_event_inner: ProgressionEventInner::ProgressionUpdate {
@@ -640,7 +666,7 @@ impl MinecraftJavaInstance {
                             caused_by: CausedBy::Unknown,
                         });
                     } else {
-                        let _ = event_broadcaster.send(Event {
+                        event_broadcaster.send(Event {
                             event_inner: EventInner::ProgressionEvent(ProgressionEvent {
                                 event_id: progression_event_id,
                                 progression_event_inner: ProgressionEventInner::ProgressionUpdate {
@@ -663,10 +689,18 @@ impl MinecraftJavaInstance {
             true,
         )
         .await?;
-
+        let jre = path_to_runtimes
+            .join("java")
+            .join(format!("jre{}", jre_major_version))
+            .join(if std::env::consts::OS == "macos" {
+                "Contents/Home/bin"
+            } else {
+                "bin"
+            })
+            .join("java");
         // Step 3 (part 2): Forge Setup
         if let Flavour::Forge { .. } = flavour.clone() {
-            let _ = event_broadcaster.send(Event {
+            event_broadcaster.send(Event {
                 event_inner: EventInner::ProgressionEvent(ProgressionEvent {
                     event_id: progression_event_id,
                     progression_event_inner: ProgressionEventInner::ProgressionUpdate {
@@ -679,26 +713,17 @@ impl MinecraftJavaInstance {
                 caused_by: CausedBy::Unknown,
             });
 
-            let jre = path_to_runtimes
-                .join("java")
-                .join(format!("jre{}", jre_major_version))
-                .join(if std::env::consts::OS == "macos" {
-                    "Contents/Home/bin"
-                } else {
-                    "bin"
-                })
-                .join("java");
-
             if !dont_spawn_terminal(
                 Command::new(&jre)
                     .arg("-jar")
                     .arg(&path_to_instance.join("forge-installer.jar"))
                     .arg("--installServer")
-                    .arg(&path_to_instance),
+                    .arg(&path_to_instance)
+                    .current_dir(&path_to_instance),
             )
+            .stderr(Stdio::null())
             .stdout(Stdio::null())
             .stdin(Stdio::null())
-            .stderr(Stdio::null())
             .spawn()
             .context("Failed to start forge-installer.jar")?
             .wait()
@@ -718,7 +743,7 @@ impl MinecraftJavaInstance {
         }
 
         // Step 4: Finishing Up
-        let _ = event_broadcaster.send(Event {
+        event_broadcaster.send(Event {
             event_inner: EventInner::ProgressionEvent(ProgressionEvent {
                 event_id: progression_event_id,
                 progression_event_inner: ProgressionEventInner::ProgressionUpdate {
@@ -745,6 +770,7 @@ impl MinecraftJavaInstance {
             backup_period: config.backup_period,
             jre_major_version,
             has_started: false,
+            java_cmd: Some(jre.to_string_lossy().to_string()),
         };
         // create config file
         tokio::fs::write(
@@ -772,7 +798,7 @@ impl MinecraftJavaInstance {
         path_to_instance: PathBuf,
         dot_lodestone_config: DotLodestoneConfig,
         instance_uuid: InstanceUuid,
-        event_broadcaster: Sender<Event>,
+        event_broadcaster: EventBroadcaster,
         _macro_executor: MacroExecutor,
     ) -> Result<MinecraftJavaInstance, Error> {
         let path_to_config = path_to_instance.join(".lodestone_minecraft_config.json");
@@ -907,7 +933,7 @@ impl MinecraftJavaInstance {
                 event_broadcaster.clone(),
                 instance_uuid,
             ))),
-            config: restore_config,
+            config: Arc::new(Mutex::new(restore_config)),
             path_to_instance,
             path_to_config,
             path_to_properties,
@@ -933,7 +959,7 @@ impl MinecraftJavaInstance {
     async fn write_config_to_file(&self) -> Result<(), Error> {
         tokio::fs::write(
             &self.path_to_config,
-            to_string_pretty(&self.config)
+            to_string_pretty(&*self.config.lock().await)
                 .context("Failed to serialize config to string, this is a bug, please report it")?,
         )
         .await
@@ -946,11 +972,25 @@ impl MinecraftJavaInstance {
 
     async fn read_properties(&mut self) -> Result<(), Error> {
         let properties = read_properties_from_path(&self.path_to_properties).await?;
+        let mut lock = self.configurable_manifest.lock().await;
         for (key, value) in properties.iter() {
-            self.configurable_manifest.lock().await.set_setting(
-                ServerPropertySetting::get_section_id(),
-                ServerPropertySetting::from_key_val(key, value)?.into(),
-            )?;
+            let _ = lock
+                .set_setting(
+                    ServerPropertySetting::get_section_id(),
+                    match ServerPropertySetting::from_key_val(key, value) {
+                        Ok(v) => v.into(),
+                        Err(e) => {
+                            error!(
+                                "Failed to parse property {} with value {}: {}",
+                                key, value, e
+                            );
+                            continue;
+                        }
+                    },
+                )
+                .map_err(|e| {
+                    error!("Failed to set property {} to {}: {}", key, value, e);
+                });
         }
         Ok(())
     }
@@ -991,6 +1031,56 @@ impl MinecraftJavaInstance {
                 &self.path_to_properties.display()
             ))?;
         Ok(())
+    }
+
+    async fn sync_configurable_to_restore_config(&self) {
+        let mut config_lock = self.config.lock().await;
+        let configurable_map_lock = self.configurable_manifest.lock().await;
+        let configurable_map = configurable_map_lock
+            .get_section(CmdArgSetting::get_section_id())
+            .unwrap()
+            .all_settings();
+        config_lock.cmd_args = configurable_map
+            .get(CmdArgSetting::Args(Default::default()).get_identifier())
+            .expect("Programming error, value is not set")
+            .get_value()
+            .expect("Programming error, value is not set")
+            .clone()
+            .try_as_string()
+            .expect("Programming error, value is not a string")
+            .split(' ')
+            .map(|s| s.to_string())
+            .collect();
+
+        config_lock.max_ram = configurable_map
+            .get(CmdArgSetting::MaxRam(Default::default()).get_identifier())
+            .expect("Programming error, value is not set")
+            .get_value()
+            .expect("Programming error, value is not set")
+            .clone()
+            .try_as_unsigned_integer()
+            .expect("Programming error, value is not an unsigned integer");
+
+        config_lock.min_ram = configurable_map
+            .get(CmdArgSetting::MinRam(Default::default()).get_identifier())
+            .expect("Programming error, value is not set")
+            .get_value()
+            .expect("Programming error, value is not set")
+            .clone()
+            .try_as_unsigned_integer()
+            .expect("Programming error, value is not an unsigned integer");
+
+        config_lock.java_cmd = Some(
+            configurable_map
+                .get(CmdArgSetting::JavaCmd(Default::default()).get_identifier())
+                .expect("Programming error, value is not set")
+                .get_value()
+                .expect("Programming error, value is not set")
+                .clone()
+                .try_as_string()
+                .expect("Programming error, value is not a string")
+                .to_owned(),
+        );
     }
 
     pub async fn send_rcon(&self, cmd: &str) -> Result<String, Error> {

@@ -1,3 +1,5 @@
+#![allow(clippy::enum_variant_names)]
+
 use std::{collections::HashSet, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -65,6 +67,9 @@ pub enum UserEventInner {
     UserDeleted,
     UserLoggedIn,
     UserLoggedOut,
+    UsernameChanged {
+        new_username: String,
+    },
     PermissionChanged {
         new_permissions: Box<UserPermission>,
     },

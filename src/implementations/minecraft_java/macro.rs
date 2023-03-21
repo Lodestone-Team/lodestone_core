@@ -36,12 +36,6 @@ async fn send_rcon(state: Rc<RefCell<OpState>>, cmd: String) -> Result<String, a
 }
 
 #[op]
-fn config(state: Rc<RefCell<OpState>>) -> Result<String, anyhow::Error> {
-    let instance = state.borrow().borrow::<MinecraftJavaInstance>().clone();
-    Ok(serde_json::to_string(&instance.config)?)
-}
-
-#[op]
 async fn on_event(
     state: Rc<RefCell<OpState>>,
     event: String,
@@ -186,7 +180,6 @@ impl MainWorkerGenerator for MinecraftMainWorkerGenerator {
             .ops(vec![
                 send_stdin::decl(),
                 send_rcon::decl(),
-                config::decl(),
                 on_event::decl(),
             ])
             .state({
@@ -263,13 +256,15 @@ impl TMacro for MinecraftJavaInstance {
             .ok_or_else(|| eyre!("Failed to resolve macro invocation for {}", name))?;
 
         let main_worker_generator = MinecraftMainWorkerGenerator::new(self.clone());
-        self.macro_executor.spawn(
-            path_to_macro,
-            args,
-            caused_by,
-            Box::new(main_worker_generator),
-            Some(self.uuid.clone()),
-        );
+        self.macro_executor
+            .spawn(
+                path_to_macro,
+                args,
+                caused_by,
+                Box::new(main_worker_generator),
+                Some(self.uuid.clone()),
+            )
+            .await?;
         // self.macro_executor.spawn(exec_instruction).await?;
 
         Ok(())
