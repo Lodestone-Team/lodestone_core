@@ -7,11 +7,11 @@ use crate::{
     types::{InstanceUuid, Snowflake},
 };
 
-use super::player::MinecraftJavaPlayer;
+use super::player::MinecraftBedrockPlayer;
 
 #[derive(Clone)]
 pub struct PlayersManager {
-    players: HashSet<MinecraftJavaPlayer>,
+    players: HashSet<MinecraftBedrockPlayer>,
     event_broadcaster: EventBroadcaster,
     instance_uuid: InstanceUuid,
 }
@@ -25,7 +25,7 @@ impl PlayersManager {
         }
     }
 
-    pub fn add_player(&mut self, player: MinecraftJavaPlayer, instance_name: String) {
+    pub fn add_player(&mut self, player: MinecraftBedrockPlayer, instance_name: String) {
         self.players.insert(player.clone());
         self.event_broadcaster.send(Event {
             event_inner: EventInner::InstanceEvent(InstanceEvent {
@@ -45,7 +45,7 @@ impl PlayersManager {
         });
     }
 
-    pub fn remove_player(&mut self, player: MinecraftJavaPlayer, instance_name: String) {
+    pub fn remove_player(&mut self, player: MinecraftBedrockPlayer, instance_name: String) {
         if self.players.remove(&player) {
             self.event_broadcaster.send(Event {
                 event_inner: EventInner::InstanceEvent(InstanceEvent {
@@ -102,8 +102,8 @@ impl PlayersManager {
     }
 }
 
-impl AsRef<HashSet<MinecraftJavaPlayer>> for PlayersManager {
-    fn as_ref(&self) -> &HashSet<MinecraftJavaPlayer> {
+impl AsRef<HashSet<MinecraftBedrockPlayer>> for PlayersManager {
+    fn as_ref(&self) -> &HashSet<MinecraftBedrockPlayer> {
         &self.players
     }
 }
@@ -112,7 +112,7 @@ impl From<PlayersManager> for HashSet<Player> {
     fn from(val: PlayersManager) -> Self {
         val.players
             .into_iter()
-            .map(Player::MinecraftJavaPlayer)
+            .map(Player::MinecraftBedrockPlayer)
             .collect()
     }
 }
@@ -136,7 +136,7 @@ mod tests {
         let mut players_manager = super::PlayersManager::new(tx, mock_instance.0.clone());
 
         players_manager.add_player(
-            super::MinecraftJavaPlayer {
+            super::MinecraftBedrockPlayer {
                 name: "player1".to_string(),
                 uuid: Some("uuid1".to_string()),
             },
@@ -144,7 +144,7 @@ mod tests {
         );
 
         players_manager.add_player(
-            super::MinecraftJavaPlayer {
+            super::MinecraftBedrockPlayer {
                 name: "player2".to_string(),
                 uuid: Some("uuid2".to_string()),
             },
@@ -152,7 +152,7 @@ mod tests {
         );
 
         players_manager.add_player(
-            super::MinecraftJavaPlayer {
+            super::MinecraftBedrockPlayer {
                 name: "player3".to_string(),
                 uuid: Some("uuid3".to_string()),
             },
@@ -167,11 +167,11 @@ mod tests {
 
         let expected = vec![
             InstanceEventInner::PlayerChange {
-                player_list: HashSet::from([Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                player_list: HashSet::from([Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                     name: "player1".to_string(),
                     uuid: Some("uuid1".to_string()),
                 })]),
-                players_joined: HashSet::from([Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                players_joined: HashSet::from([Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                     name: "player1".to_string(),
                     uuid: Some("uuid1".to_string()),
                 })]),
@@ -179,16 +179,16 @@ mod tests {
             },
             InstanceEventInner::PlayerChange {
                 player_list: HashSet::from([
-                    Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                    Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                         name: "player1".to_string(),
                         uuid: Some("uuid1".to_string()),
                     }),
-                    Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                    Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                         name: "player2".to_string(),
                         uuid: Some("uuid2".to_string()),
                     }),
                 ]),
-                players_joined: HashSet::from([Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                players_joined: HashSet::from([Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                     name: "player2".to_string(),
                     uuid: Some("uuid2".to_string()),
                 })]),
@@ -196,20 +196,20 @@ mod tests {
             },
             InstanceEventInner::PlayerChange {
                 player_list: HashSet::from([
-                    Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                    Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                         name: "player1".to_string(),
                         uuid: Some("uuid1".to_string()),
                     }),
-                    Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                    Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                         name: "player2".to_string(),
                         uuid: Some("uuid2".to_string()),
                     }),
-                    Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                    Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                         name: "player3".to_string(),
                         uuid: Some("uuid3".to_string()),
                     }),
                 ]),
-                players_joined: HashSet::from([Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                players_joined: HashSet::from([Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                     name: "player3".to_string(),
                     uuid: Some("uuid3".to_string()),
                 })]),
@@ -217,28 +217,28 @@ mod tests {
             },
             InstanceEventInner::PlayerChange {
                 player_list: HashSet::from([
-                    Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                    Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                         name: "player1".to_string(),
                         uuid: Some("uuid1".to_string()),
                     }),
-                    Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                    Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                         name: "player3".to_string(),
                         uuid: Some("uuid3".to_string()),
                     }),
                 ]),
                 players_joined: HashSet::new(),
-                players_left: HashSet::from([Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                players_left: HashSet::from([Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                     name: "player2".to_string(),
                     uuid: Some("uuid2".to_string()),
                 })]),
             },
             InstanceEventInner::PlayerChange {
-                player_list: HashSet::from([Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                player_list: HashSet::from([Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                     name: "player1".to_string(),
                     uuid: Some("uuid1".to_string()),
                 })]),
                 players_joined: HashSet::new(),
-                players_left: HashSet::from([Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                players_left: HashSet::from([Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                     name: "player3".to_string(),
                     uuid: Some("uuid3".to_string()),
                 })]),
@@ -246,7 +246,7 @@ mod tests {
             InstanceEventInner::PlayerChange {
                 player_list: HashSet::new(),
                 players_joined: HashSet::new(),
-                players_left: HashSet::from([Player::MinecraftJavaPlayer(super::MinecraftJavaPlayer {
+                players_left: HashSet::from([Player::MinecraftBedrockPlayer(super::MinecraftBedrockPlayer {
                     name: "player1".to_string(),
                     uuid: Some("uuid1".to_string()),
                 })]),

@@ -1,6 +1,7 @@
 pub mod configurable;
 pub mod r#macro;
 pub mod player;
+pub mod players_manager;
 pub mod resource;
 pub mod util;
 pub mod server;
@@ -8,11 +9,11 @@ pub mod server;
 use crate::event_broadcaster::EventBroadcaster;
 use crate::traits::t_configurable::GameType;
 
+use std::collections::HashMap;
 use async_trait::async_trait;
 use color_eyre::eyre::{eyre, Context, ContextCompat};
 use enum_kinds::EnumKind;
 use indexmap::IndexMap;
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::AtomicBool;
@@ -35,9 +36,9 @@ use ts_rs::TS;
 
 use crate::error::{Error, ErrorKind};
 use crate::events::{CausedBy, Event, EventInner, ProgressionEvent, ProgressionEventInner};
-use crate::macro_executor::MacroExecutor;
+use crate::macro_executor::{MacroExecutor, MacroPID};
 use crate::prelude::PATH_TO_BINARIES;
-use crate::traits::t_configurable::{PathBuf, TConfigurable, Game};
+use crate::traits::t_configurable::PathBuf;
 
 use crate::traits::t_configurable::manifest::{
     ConfigurableManifest, ConfigurableValue, ConfigurableValueType, ManifestValue, SectionManifest,
@@ -47,15 +48,15 @@ use crate::traits::t_configurable::manifest::{
 use self::util::{get_server_zip_url, get_minecraft_bedrock_version, read_properties_from_path};
 use self::configurable::ServerPropertySetting;
 
-use crate::traits::t_macro::TMacro;
-use crate::traits::t_player::TPlayerManagement;
-use crate::traits::t_resource::TResourceManagement;
+use crate::traits::t_macro::TaskEntry;
 use crate::traits::t_server::{State, TServer, MonitorReport};
 use crate::traits::TInstance;
 use crate::types::{DotLodestoneConfig, InstanceUuid, Snowflake};
 use crate::util::{
     dont_spawn_terminal, download_file, format_byte, format_byte_download, unzip_file,
 };
+
+use self::players_manager::PlayersManager;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SetupConfig {
@@ -105,11 +106,12 @@ pub struct MinecraftBedrockInstance {
     process: Arc<Mutex<Option<Child>>>,
     stdin: Arc<Mutex<Option<tokio::process::ChildStdin>>>,
     system: Arc<Mutex<sysinfo::System>>,
-    // players_manager: Arc<Mutex<PlayersManager>>,
+    players_manager: Arc<Mutex<PlayersManager>>,
     configurable_manifest: Arc<Mutex<ConfigurableManifest>>,
     macro_executor: MacroExecutor,
-    // backup_sender: UnboundedSender<BackupInstruction>,
-    rcon_conn: Arc<Mutex<Option<rcon::Connection<tokio::net::TcpStream>>>>,
+    backup_sender: UnboundedSender<BackupInstruction>,
+    macro_name_to_last_run: Arc<Mutex<HashMap<String, i64>>>,
+    pid_to_task_entry: Arc<Mutex<IndexMap<MacroPID, TaskEntry>>>,
 }
 
 
@@ -358,6 +360,44 @@ impl MinecraftBedrockInstance {
         Ok(())
     }
 
+    async fn write_properties_to_file(&self) -> Result<(), Error> {
+        // open the file in write-only mode, returns `io::Result<File>`
+        let mut file = tokio::fs::File::create(&self.path_to_properties)
+            .await
+            .context(format!(
+                "Failed to open properties file at {}",
+                &self.path_to_properties.display()
+            ))?;
+        let mut setting_str = "".to_string();
+        for (key, value) in self
+            .configurable_manifest
+            .lock()
+            .await
+            .get_section(ServerPropertySetting::get_section_id())
+            .unwrap()
+            .all_settings()
+            .iter()
+        {
+            // print the key and value separated by a =
+            // println!("{}={}", key, value);
+            setting_str.push_str(&format!(
+                "{}={}\n",
+                key,
+                value
+                    .get_value()
+                    .expect("Programming error, value is not set")
+                    .to_string()
+            ));
+        }
+        file.write_all(setting_str.as_bytes())
+            .await
+            .context(format!(
+                "Failed to write properties to file at {}",
+                &self.path_to_properties.display()
+            ))?;
+        Ok(())
+    }
+
     pub async fn new(
         config: SetupConfig,
         dot_lodestone_config: DotLodestoneConfig,
@@ -365,7 +405,7 @@ impl MinecraftBedrockInstance {
         progression_event_id: Snowflake,
         event_broadcaster: EventBroadcaster,
         macro_executor: MacroExecutor,
-    ) -> Result<(), Error> {
+    ) -> Result<MinecraftBedrockInstance, Error> {
         // Step 2: Download server zip
         let server_zip_url = get_server_zip_url(&config.version)
             .await
@@ -503,15 +543,14 @@ impl MinecraftBedrockInstance {
             &path_to_config.display()
         ))?;
 
-        Ok(())
-        // MinecraftBedrockInstance::restore(
-        //     path_to_instance,
-        //     dot_lodestone_config,
-        //     uuid,
-        //     event_broadcaster,
-        //     macro_executor,
-        // )
-        // .await
+        MinecraftBedrockInstance::restore(
+            path_to_instance,
+            dot_lodestone_config,
+            uuid,
+            event_broadcaster,
+            macro_executor,
+        )
+        .await
     }
 
     pub async fn restore(
@@ -639,10 +678,10 @@ impl MinecraftBedrockInstance {
             auto_start: Arc::new(AtomicBool::new(restore_config.auto_start)),
             restart_on_crash: Arc::new(AtomicBool::new(restore_config.restart_on_crash)),
             backup_period: restore_config.backup_period,
-            // players_manager: Arc::new(Mutex::new(PlayersManager::new(
-            //     event_broadcaster.clone(),
-            //     instance_uuid,
-            // ))),
+            players_manager: Arc::new(Mutex::new(PlayersManager::new(
+                event_broadcaster.clone(),
+                instance_uuid,
+            ))),
             config: Arc::new(Mutex::new(restore_config)),
             path_to_instance,
             path_to_config,
@@ -654,9 +693,10 @@ impl MinecraftBedrockInstance {
             process: Arc::new(Mutex::new(None)),
             system: Arc::new(Mutex::new(sysinfo::System::new_all())),
             stdin: Arc::new(Mutex::new(None)),
-            // backup_sender: backup_tx,
-            rcon_conn: Arc::new(Mutex::new(None)),
+            backup_sender: backup_tx,
             configurable_manifest,
+            macro_name_to_last_run: Arc::new(Mutex::new(HashMap::new())),
+            pid_to_task_entry: Arc::new(Mutex::new(IndexMap::new())),
         };
         instance
             .read_properties()
@@ -693,7 +733,7 @@ async fn test_setup_server() {
         // progression_event_id: Snowflake,
         // event_broadcaster: Sender<Event>,
         // macro_executor: MacroExecutor,
-    let instance = MinecraftBedrockInstance::new(
+    let mut instance = MinecraftBedrockInstance::new(
         setup_conf,
         lodestone_conf,
         PathBuf::from(r"D:\Programming\gamerinstance"),
@@ -701,6 +741,11 @@ async fn test_setup_server() {
         event_broadcaster,
         macro_executor,
     ).await.unwrap();
+
+    let caused_by = CausedBy::Unknown;
+
+    instance.start(caused_by, false).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(500)).await;
 }
 
 impl TInstance for MinecraftBedrockInstance {}

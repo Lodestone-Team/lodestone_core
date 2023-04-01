@@ -12,18 +12,18 @@ use super::MinecraftJavaInstance;
 
 #[derive(Eq, Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct MinecraftPlayer {
+pub struct MinecraftJavaPlayer {
     pub name: String,
     pub uuid: Option<String>,
 }
 
-impl MinecraftPlayer {
+impl MinecraftJavaPlayer {
     pub fn new(name: String, uuid: Option<String>) -> Self {
         Self { name, uuid }
     }
 }
 
-impl PartialEq for MinecraftPlayer {
+impl PartialEq for MinecraftJavaPlayer {
     fn eq(&self, other: &Self) -> bool {
         // if uuid is not set, compare by name
         if self.uuid.is_none() || other.uuid.is_none() {
@@ -35,13 +35,13 @@ impl PartialEq for MinecraftPlayer {
 }
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-impl Hash for MinecraftPlayer {
+impl Hash for MinecraftJavaPlayer {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.uuid.hash(state);
     }
 }
 
-impl TPlayer for MinecraftPlayer {
+impl TPlayer for MinecraftJavaPlayer {
     fn get_id(&self) -> String {
         self.uuid.clone().unwrap_or_else(|| self.name.clone())
     }
