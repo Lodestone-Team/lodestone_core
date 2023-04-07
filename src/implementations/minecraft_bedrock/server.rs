@@ -135,7 +135,7 @@ impl TServer for MinecraftBedrockInstance {
 
                         fn parse_player_left(system_msg: &str) -> Option<String> {
                             lazy_static! {
-                                static ref RE: Regex = Regex::new(r"(?<=Player disconnected: )\w+").unwrap();
+                                static ref RE: Regex = Regex::new(r"Player disconnected:\s*(\w+)").unwrap();
                             }
                             if RE.is_match(system_msg).unwrap() {
                                 if let Some(cap) = RE.captures(system_msg).ok()? {
