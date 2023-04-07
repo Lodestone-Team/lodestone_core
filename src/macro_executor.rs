@@ -11,10 +11,11 @@ use std::{
 
 use color_eyre::eyre::Context;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::{
     runtime::Builder,
-    sync::{oneshot, Mutex},
-    task::LocalSet,
+    sync::{mpsc, oneshot, Mutex},
+    task::{JoinHandle, LocalSet},
 };
 use tracing::{debug, error, log::warn};
 use ts_rs::TS;
@@ -207,6 +208,8 @@ impl ModuleLoader for TypescriptModuleLoader {
 pub struct MacroExecutor {
     macro_process_table: Arc<Mutex<HashMap<MacroPID, deno_core::v8::IsolateHandle>>>,
     exit_status_table: Arc<Mutex<HashMap<MacroPID, ExitStatus>>>,
+    channel_table:
+        Arc<Mutex<HashMap<MacroPID, (mpsc::UnboundedSender<Value>, mpsc::UnboundedSender<Value>)>>>,
     event_broadcaster: EventBroadcaster,
     next_process_id: Arc<AtomicUsize>,
 }
@@ -241,11 +244,21 @@ impl MacroExecutor {
         MacroExecutor {
             macro_process_table: process_table,
             event_broadcaster,
+            channel_table: Arc::new(Mutex::new(HashMap::new())),
             exit_status_table,
             next_process_id: process_id,
         }
     }
 
+    /// For timeout:
+    ///
+    /// If `None`, the handle will never timeout.
+    ///
+    /// If `Some(Duration)`, the handle will timeout after the duration.
+    ///
+    /// Note that this does not terminate the process, it just stops the handle from waiting for it.
+    ///
+    /// It is up to the caller to terminate the process if it is still running.
     pub async fn spawn(
         &self,
         path_to_main_module: PathBuf,
@@ -253,8 +266,13 @@ impl MacroExecutor {
         caused_by: CausedBy,
         main_worker_generator: Box<dyn MainWorkerGenerator>,
         instance_uuid: Option<InstanceUuid>,
-    ) -> Result<MacroPID, Error> {
+        timeout: Option<Duration>,
+    ) -> Result<(MacroPID, JoinHandle<Result<(), Error>>), Error> {
         let pid = MacroPID(self.next_process_id.fetch_add(1, Ordering::SeqCst));
+        let wait_task = tokio::task::spawn({
+            let __self = self.clone();
+            async move { __self.wait_with_timeout(pid, timeout).await }
+        });
 
         let rt = Builder::new_current_thread().enable_all().build().unwrap();
         std::thread::spawn({
@@ -370,7 +388,6 @@ impl MacroExecutor {
                         }
                         .into(),
                     );
-                    dbg!("sending macro stopped event");
 
                     // If the while loop returns, then all the LocalSpawner
                     // objects have been dropped.
@@ -411,7 +428,7 @@ impl MacroExecutor {
         tokio::time::timeout(Duration::from_secs(1), fut)
             .await
             .context("Failed to spawn macro")??;
-        Ok(pid)
+        Ok((pid, wait_task))
     }
 
     /// abort a macro execution
@@ -428,18 +445,16 @@ impl MacroExecutor {
         Ok(())
     }
     /// wait for a macro to finish
-    ///
-    /// if timeout is None, wait forever
-    ///
-    /// if timeout is Some, wait for the specified amount of time
-    ///
-    /// returns true if the macro finished, false if the timeout was reached
-    pub async fn wait_with_timeout(&self, taget_macro_pid: MacroPID, timeout: Option<f64>) -> bool {
+    async fn wait_with_timeout(
+        &self,
+        taget_macro_pid: MacroPID,
+        timeout: Option<Duration>,
+    ) -> Result<(), Error> {
         let mut rx = self.event_broadcaster.subscribe();
         tokio::select! {
             _ = async {
                 if let Some(timeout) = timeout {
-                    tokio::time::sleep(Duration::from_secs_f64(timeout)).await;
+                    tokio::time::sleep(timeout).await;
                 } else {
                     // create a future that never resolves
                     let (_tx, rx) = oneshot::channel::<()>();
@@ -447,22 +462,29 @@ impl MacroExecutor {
 
                 }
             } => {
-                false
+                Err(eyre!("Timeout reached while waiting for macro to finish").into())
             }
-            _ = {
+            v = {
                 async {
                     loop {
                     let event = rx.recv().await.unwrap();
                     if let EventInner::MacroEvent(MacroEvent { macro_pid, macro_event_inner, .. }) = event.event_inner {
                         if taget_macro_pid == macro_pid {
-                           if let MacroEventInner::Stopped{..} = macro_event_inner {
-                               break;
+                           if let MacroEventInner::Stopped{exit_status } = macro_event_inner {
+                               if exit_status.is_success() {
+                                   break Ok(());
+                               } else {
+                                   break Err(Error {
+                                        kind: ErrorKind::Internal,
+                                        source: eyre!("Macro exited with error: {:?}", exit_status),
+                                   });
+                               }
                            }
                         }
                     }
                 }
             }} => {
-                true
+                v
             }
         }
     }
@@ -522,6 +544,8 @@ mod tests {
     }
     #[tokio::test]
     async fn basic_execution() {
+        // init tracing
+        tracing_subscriber::fmt::init();
         let (event_broadcaster, _) = EventBroadcaster::new(10);
         // construct a macro executor
         let executor = super::MacroExecutor::new(event_broadcaster);
@@ -543,17 +567,18 @@ mod tests {
 
         let basic_worker_generator = BasicMainWorkerGenerator;
 
-        let pid = executor
+        let (_, handle) = executor
             .spawn(
                 path_to_macro,
                 Vec::new(),
                 CausedBy::Unknown,
                 Box::new(basic_worker_generator),
                 None,
+                None,
             )
             .await
             .unwrap();
-        assert!(executor.wait_with_timeout(pid, None).await);
+        handle.await.unwrap().unwrap();
     }
 
     #[tokio::test]
@@ -580,16 +605,17 @@ mod tests {
 
         let basic_worker_generator = BasicMainWorkerGenerator;
 
-        let pid = executor
+        let (_, handle) = executor
             .spawn(
                 path_to_macro,
                 Vec::new(),
                 CausedBy::Unknown,
                 Box::new(basic_worker_generator),
                 None,
+                None,
             )
             .await
             .unwrap();
-        assert!(executor.wait_with_timeout(pid, None).await);
+        handle.await.unwrap().unwrap();
     }
 }

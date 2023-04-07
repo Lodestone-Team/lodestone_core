@@ -40,6 +40,7 @@ pub struct InstanceInfo {
 }
 use crate::minecraft_java::MinecraftJavaInstance;
 use crate::minecraft_bedrock::MinecraftBedrockInstance;
+use crate::generic::GenericInstance;
 use crate::prelude::GameInstance;
 use crate::types::InstanceUuid;
 #[async_trait]

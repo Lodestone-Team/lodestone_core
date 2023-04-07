@@ -290,7 +290,7 @@ impl TMacro for MinecraftBedrockInstance {
             .ok_or_else(|| eyre!("Failed to resolve macro invocation for {}", name))?;
 
         let main_worker_generator = MinecraftMainWorkerGenerator::new(self.clone());
-        let pid = self
+        let (pid, _) = self
             .macro_executor
             .spawn(
                 path_to_macro,
@@ -298,6 +298,7 @@ impl TMacro for MinecraftBedrockInstance {
                 caused_by,
                 Box::new(main_worker_generator),
                 Some(self.uuid.clone()),
+                None,
             )
             .await?;
         let entry = TaskEntry {

@@ -29,8 +29,7 @@ use error::Error;
 use events::{CausedBy, Event};
 use futures::Future;
 use global_settings::GlobalSettings;
-use implementations::minecraft_java;
-use implementations::minecraft_bedrock;
+use implementations::{generic, minecraft_java, minecraft_bedrock};
 use macro_executor::MacroExecutor;
 use port_manager::PortManager;
 use prelude::GameInstance;
@@ -469,7 +468,7 @@ pub async fn run() -> (
 
                 let api_routes = Router::new()
                     .merge(get_events_routes(shared_state.clone()))
-                    .merge(get_instance_setup_config_routes())
+                    .merge(get_instance_setup_config_routes(shared_state.clone()))
                     .merge(get_instance_server_routes(shared_state.clone()))
                     .merge(get_instance_config_routes(shared_state.clone()))
                     .merge(get_instance_players_routes(shared_state.clone()))
@@ -524,7 +523,7 @@ pub async fn run() -> (
                 // cleanup
                 let mut instances = shared_state.instances.lock().await;
                 for (_, instance) in instances.iter_mut() {
-                    let _ = instance.stop(CausedBy::System, true);
+                    let _ = instance.stop(CausedBy::System, false).await;
                 }
             }
         },

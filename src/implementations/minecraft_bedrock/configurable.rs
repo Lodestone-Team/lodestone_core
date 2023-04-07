@@ -36,10 +36,6 @@ impl TConfigurable for MinecraftBedrockInstance {
         self.config.lock().await.version.clone()
     }
 
-    async fn flavour(&self) -> String {
-        String::from("Vanilla")
-    }
-
     async fn description(&self) -> String {
         self.config.lock().await.description.clone()
     }

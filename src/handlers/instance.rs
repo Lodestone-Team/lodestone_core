@@ -4,6 +4,7 @@ use axum::{extract::Path, Json};
 use axum_auth::AuthBearer;
 
 use color_eyre::eyre::{eyre, Context};
+use serde::Deserialize;
 
 use crate::auth::user::UserAction;
 use crate::error::{Error, ErrorKind};
@@ -12,11 +13,16 @@ use crate::events::{
     ProgressionStartValue,
 };
 
+use crate::implementations::generic;
+use crate::traits::t_configurable::GameType;
+
 use minecraft_java::FlavourKind;
 
 use crate::implementations::minecraft_java::MinecraftJavaInstance;
+use crate::implementations::minecraft_bedrock::MinecraftBedrockInstance;
+
 use crate::prelude::PATH_TO_INSTANCES;
-use crate::traits::t_configurable::manifest::ManifestValue;
+use crate::traits::t_configurable::manifest::SetupValue;
 use crate::traits::{t_configurable::TConfigurable, t_server::TServer, InstanceInfo, TInstance};
 
 use crate::types::{DotLodestoneConfig, InstanceUuid, Snowflake};
@@ -61,11 +67,149 @@ pub async fn get_instance_info(
     Ok(Json(instance.get_instance_info().await))
 }
 
-pub async fn create_instance(
+pub async fn create_minecraft_bedrock_instance(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    AuthBearer(token): AuthBearer,
+    Json(manifest_value): Json<SetupValue>,
+) -> Result<Json<InstanceUuid>, Error> {
+    let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
+    requester.try_action(&UserAction::CreateInstance)?;
+
+    let mut instance_uuid = InstanceUuid::default();
+
+    for uuid in state.instances.lock().await.keys() {
+        if let Some(uuid) = uuid.as_ref().get(0..8) {
+            if uuid == &instance_uuid.no_prefix()[0..8] {
+                instance_uuid = InstanceUuid::default();
+            }
+        }
+    }
+
+    let instance_uuid = instance_uuid;
+
+    let setup_config = MinecraftBedrockInstance::construct_setup_config(manifest_value).await?;
+
+    let setup_path = PATH_TO_INSTANCES.with(|path| {
+        path.join(format!(
+            "{}-{}",
+            setup_config.name,
+            &instance_uuid.no_prefix()[0..8]
+        ))
+    });
+
+    tokio::fs::create_dir_all(&setup_path)
+        .await
+        .context("Failed to create instance directory")?;
+
+    let dot_lodestone_config = DotLodestoneConfig::new(instance_uuid.clone(), GameType::MinecraftBedrock);
+
+    // write dot lodestone config
+
+    tokio::fs::write(
+        setup_path.join(".lodestone_config"),
+        serde_json::to_string_pretty(&dot_lodestone_config).unwrap(),
+    )
+    .await
+    .context("Failed to write .lodestone_config file")?;
+
+    tokio::task::spawn({
+        let uuid = instance_uuid.clone();
+        let instance_name = setup_config.name.clone();
+        let event_broadcaster = state.event_broadcaster.clone();
+        let port = setup_config.port;
+        let caused_by = CausedBy::User {
+            user_id: requester.uid.clone(),
+            user_name: requester.username.clone(),
+        };
+        async move {
+            let progression_event_id = Snowflake::default();
+            event_broadcaster.send(Event {
+                event_inner: EventInner::ProgressionEvent(ProgressionEvent {
+                    event_id: progression_event_id,
+                    progression_event_inner: ProgressionEventInner::ProgressionStart {
+                        progression_name: format!("Setting up Minecraft server {}", instance_name),
+                        producer_id: Some(uuid.clone()),
+                        total: Some(10.0),
+                        inner: Some(ProgressionStartValue::InstanceCreation {
+                            instance_uuid: uuid.clone(),
+                            instance_name: instance_name.clone(),
+                            port,
+                            flavour: "???".to_string(),
+                            game_type: "bedrock".to_string(),
+                        }),
+                    },
+                }),
+                details: "".to_string(),
+                snowflake: Snowflake::default(),
+                caused_by: caused_by.clone(),
+            });
+            let minecraft_instance = match MinecraftBedrockInstance::new(
+                setup_config.clone(),
+                dot_lodestone_config,
+                setup_path.clone(),
+                progression_event_id,
+                state.event_broadcaster.clone(),
+                state.macro_executor.clone(),
+            )
+            .await
+            {
+                Ok(v) => {
+                    event_broadcaster.send(Event {
+                        event_inner: EventInner::ProgressionEvent(ProgressionEvent {
+                            event_id: progression_event_id,
+                            progression_event_inner: ProgressionEventInner::ProgressionEnd {
+                                success: true,
+                                message: Some("Instance creation success".to_string()),
+                                inner: Some(ProgressionEndValue::InstanceCreation(
+                                    v.get_instance_info().await,
+                                )),
+                            },
+                        }),
+                        details: "".to_string(),
+                        snowflake: Snowflake::default(),
+                        caused_by: caused_by.clone(),
+                    });
+                    v
+                }
+                Err(e) => {
+                    event_broadcaster.send(Event {
+                        event_inner: EventInner::ProgressionEvent(ProgressionEvent {
+                            event_id: progression_event_id,
+                            progression_event_inner: ProgressionEventInner::ProgressionEnd {
+                                success: false,
+                                message: Some(format!("Instance creation failed: {:?}", e)),
+                                inner: None,
+                            },
+                        }),
+                        details: "".to_string(),
+                        snowflake: Snowflake::default(),
+                        caused_by: caused_by.clone(),
+                    });
+                    crate::util::fs::remove_dir_all(setup_path)
+                        .await
+                        .context("Failed to remove directory after instance creation failed")
+                        .unwrap();
+                    return;
+                }
+            };
+            let mut port_manager = state.port_manager.lock().await;
+            port_manager.add_port(setup_config.port);
+            state
+                .instances
+                .lock()
+                .await
+                .insert(uuid.clone(), minecraft_instance.into());
+        }
+    });
+    Ok(Json(instance_uuid))
+}
+
+
+pub async fn create_minecraft_java_instance(
     axum::extract::State(state): axum::extract::State<AppState>,
     AuthBearer(token): AuthBearer,
     Path(game_type): Path<HandlerGameType>,
-    Json(manifest_value): Json<ManifestValue>,
+    Json(manifest_value): Json<SetupValue>,
 ) -> Result<Json<InstanceUuid>, Error> {
     let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
     requester.try_action(&UserAction::CreateInstance)?;
@@ -208,6 +352,71 @@ pub async fn create_instance(
     Ok(Json(instance_uuid))
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenericSetupConfig {
+    url: String,
+    setup_value: SetupValue,
+}
+
+pub async fn create_generic_instance(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    AuthBearer(token): AuthBearer,
+    Json(setup_config): Json<GenericSetupConfig>,
+) -> Result<Json<()>, Error> {
+    let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
+    requester.try_action(&UserAction::CreateInstance)?;
+    let mut instance_uuid = InstanceUuid::default();
+    for uuid in state.instances.lock().await.keys() {
+        if let Some(uuid) = uuid.as_ref().get(0..8) {
+            if uuid == &instance_uuid.no_prefix()[0..8] {
+                instance_uuid = InstanceUuid::default();
+            }
+        }
+    }
+
+    let instance_uuid = instance_uuid;
+
+    let setup_path = PATH_TO_INSTANCES.with(|path| {
+        path.join(format!(
+            "{}-{}",
+            "generic",
+            &instance_uuid.no_prefix()[0..8]
+        ))
+    });
+
+    tokio::fs::create_dir_all(&setup_path)
+        .await
+        .context("Failed to create instance directory")?;
+
+    let dot_lodestone_config = DotLodestoneConfig::new(instance_uuid.clone(), GameType::Generic);
+
+    // write dot lodestone config
+
+    tokio::fs::write(
+        setup_path.join(".lodestone_config"),
+        serde_json::to_string_pretty(&dot_lodestone_config).unwrap(),
+    )
+    .await
+    .context("Failed to write .lodestone_config file")?;
+
+    let instance = generic::GenericInstance::new(
+        setup_config.url,
+        setup_path,
+        dot_lodestone_config,
+        setup_config.setup_value,
+        state.event_broadcaster.clone(),
+        state.macro_executor.clone(),
+    )
+    .await?;
+
+    state
+        .instances
+        .lock()
+        .await
+        .insert(instance_uuid.clone(), instance.into());
+    Ok(Json(()))
+}
+
 pub async fn delete_instance(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path(uuid): Path<InstanceUuid>,
@@ -322,7 +531,15 @@ pub async fn delete_instance(
 pub fn get_instance_routes(state: AppState) -> Router {
     Router::new()
         .route("/instance/list", get(get_instance_list))
-        .route("/instance/create/:game_type", post(create_instance))
+        .route(
+            "/instance/create/:game_type",
+            post(create_minecraft_java_instance),
+        )
+        .route(
+            "/instance/create_bedrock",
+            post(create_minecraft_bedrock_instance),
+        )
+        .route("/instance/create_generic", post(create_generic_instance))
         .route("/instance/:uuid", delete(delete_instance))
         .route("/instance/:uuid/info", get(get_instance_info))
         .with_state(state)

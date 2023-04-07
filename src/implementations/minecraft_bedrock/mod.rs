@@ -41,8 +41,8 @@ use crate::prelude::PATH_TO_BINARIES;
 use crate::traits::t_configurable::PathBuf;
 
 use crate::traits::t_configurable::manifest::{
-    ConfigurableManifest, ConfigurableValue, ConfigurableValueType, ManifestValue, SectionManifest,
-    SectionManifestValue, SettingManifest,
+    ConfigurableManifest, ConfigurableValue, ConfigurableValueType, SectionManifest,
+    SettingManifest, SetupManifest, SetupValue,
 };
 
 use self::util::{get_server_zip_url, get_minecraft_bedrock_version, read_properties_from_path};
@@ -66,7 +66,6 @@ pub struct SetupConfig {
     pub description: Option<String>,
     pub auto_start: Option<bool>,
     pub restart_on_crash: Option<bool>,
-    pub start_on_connection: Option<bool>,
     pub backup_period: Option<u32>,
 }
 
@@ -124,7 +123,7 @@ enum BackupInstruction {
 }
 
 impl MinecraftBedrockInstance { 
-    pub async fn setup_manifest() -> Result<ConfigurableManifest, Error> {
+    pub async fn setup_manifest() -> Result<SetupManifest, Error> {
         let version = get_minecraft_bedrock_version().await?;
 
         let name_setting = SettingManifest::new_required_value(
@@ -237,43 +236,26 @@ impl MinecraftBedrockInstance {
         sections.insert("section_1".to_string(), section_1);
         sections.insert("section_2".to_string(), section_2);
 
-        Ok(ConfigurableManifest::new(
-            String::from("Minecraft Bedrock Server"),
-            None,
-            false,
-            false,
-            sections,
-        ))
-    }
-
-    pub async fn validate_section(
-        section_id: &str,
-        section_value: &SectionManifestValue,
-    ) -> Result<(), Error> {
-        let manifest = Self::setup_manifest().await?;
-        if let Some(section) = manifest.get_section(section_id) {
-            section.validate_section(section_value)?;
-            Ok(())
-        } else {
-            Err(eyre!("Section {} does not exist", section_id).into())
-        }
+        Ok(SetupManifest {
+            setting_sections: sections,
+        })
     }
 
     pub async fn construct_setup_config(
-        manifest_value: ManifestValue,
+        setup_value: SetupValue,
     ) -> Result<SetupConfig, Error> {
         Self::setup_manifest()
             .await?
-            .validate_manifest_value(&manifest_value)?;
+            .validate_setup_value(&setup_value)?;
 
         // ALL of the following unwraps are safe because we just validated the manifest value
-        let description = manifest_value
+        let description = setup_value
             .get_unique_setting("description")
             .unwrap()
             .get_value()
             .map(|v| v.try_as_string().unwrap());
 
-        let name = manifest_value
+        let name = setup_value
             .get_unique_setting("name")
             .unwrap()
             .get_value()
@@ -281,7 +263,7 @@ impl MinecraftBedrockInstance {
             .try_as_string()
             .unwrap();
 
-        let version = manifest_value
+        let version = setup_value
             .get_unique_setting("version")
             .unwrap()
             .get_value()
@@ -289,7 +271,7 @@ impl MinecraftBedrockInstance {
             .try_as_enum()
             .unwrap();
 
-        let port = manifest_value
+        let port = setup_value
             .get_unique_setting("port")
             .unwrap()
             .get_value()
@@ -302,9 +284,8 @@ impl MinecraftBedrockInstance {
             description: description.cloned(),
             version: version.clone(),
             port,
-            auto_start: Some(manifest_value.get_auto_start()),
-            restart_on_crash: Some(manifest_value.get_restart_on_crash()),
-            start_on_connection: Some(manifest_value.get_start_on_connection()),
+            auto_start: Some(setup_value.auto_start),
+            restart_on_crash: Some(setup_value.restart_on_crash),
             backup_period: None,
         })
     }
@@ -326,13 +307,7 @@ impl MinecraftBedrockInstance {
             server_properties_section_manifest,
         );
 
-        ConfigurableManifest::new(
-            restore_config.name.clone(),
-            Some(restore_config.description.clone()),
-            false,
-            false,
-            setting_sections,
-        )
+        ConfigurableManifest::new(false, false, setting_sections)
     }
 
     async fn write_config_to_file(&self) -> Result<(), Error> {
@@ -716,7 +691,6 @@ async fn test_setup_server() {
         description: Some(String::from("test")),
         auto_start: Some(false),
         restart_on_crash: Some(true),
-        start_on_connection: Some(true),
         backup_period: Some(0),
     };
 

@@ -16,6 +16,8 @@ use crate::implementations::minecraft_java::Flavour;
 use crate::traits::GameInstance;
 use crate::traits::MinecraftJavaInstance;
 use crate::traits::MinecraftBedrockInstance;
+use crate::traits::GenericInstance;
+
 use crate::types::InstanceUuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -78,7 +80,6 @@ pub trait TConfigurable {
     // getters
     async fn uuid(&self) -> InstanceUuid;
     async fn name(&self) -> String;
-    async fn flavour(&self) -> String;
     async fn game_type(&self) -> Game;
     async fn version(&self) -> String;
     async fn description(&self) -> String;

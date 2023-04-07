@@ -1,6 +1,7 @@
 pub mod configurable;
 pub mod fabric;
 mod forge;
+mod line_parser;
 pub mod r#macro;
 mod paper;
 pub mod player;
@@ -43,8 +44,8 @@ use crate::prelude::PATH_TO_BINARIES;
 use crate::traits::t_configurable::PathBuf;
 
 use crate::traits::t_configurable::manifest::{
-    ConfigurableManifest, ConfigurableValue, ConfigurableValueType, ManifestValue, SectionManifest,
-    SectionManifestValue, SettingManifest,
+    ConfigurableManifest, ConfigurableValue, ConfigurableValueType, SectionManifest,
+    SettingManifest, SetupManifest, SetupValue,
 };
 
 use crate::traits::t_macro::TaskEntry;
@@ -149,7 +150,6 @@ pub struct SetupConfig {
     pub max_ram: Option<u32>,
     pub auto_start: Option<bool>,
     pub restart_on_crash: Option<bool>,
-    pub start_on_connection: Option<bool>,
     pub backup_period: Option<u32>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -221,7 +221,7 @@ async fn test_setup_manifest() {
 }
 
 impl MinecraftJavaInstance {
-    pub async fn setup_manifest(flavour: &FlavourKind) -> Result<ConfigurableManifest, Error> {
+    pub async fn setup_manifest(flavour: &FlavourKind) -> Result<SetupManifest, Error> {
         let versions = match flavour {
             FlavourKind::Vanilla => get_vanilla_minecraft_versions().await,
             FlavourKind::Fabric => get_fabric_minecraft_versions().await,
@@ -230,27 +230,6 @@ impl MinecraftJavaInstance {
             FlavourKind::Forge => get_forge_minecraft_versions().await,
         }
         .context("Failed to get minecraft versions")?;
-
-        let name_setting = SettingManifest::new_required_value(
-            "name".to_string(),
-            "Server Name".to_string(),
-            "The name of the server instance".to_string(),
-            ConfigurableValue::String("Minecraft Server".to_string()),
-            None,
-            false,
-            true,
-        );
-
-        let description_setting = SettingManifest::new_optional_value(
-            "description".to_string(),
-            "Description".to_string(),
-            "A description of the server instance".to_string(),
-            None,
-            ConfigurableValueType::String { regex: None },
-            None,
-            false,
-            true,
-        );
 
         let version_setting = SettingManifest::new_value_with_type(
             "version".to_string(),
@@ -309,8 +288,6 @@ impl MinecraftJavaInstance {
         );
 
         let mut section_1_map = IndexMap::new();
-        section_1_map.insert("name".to_string(), name_setting);
-        section_1_map.insert("description".to_string(), description_setting);
 
         section_1_map.insert("version".to_string(), version_setting);
         section_1_map.insert("port".to_string(), port_setting);
@@ -342,53 +319,25 @@ impl MinecraftJavaInstance {
         sections.insert("section_1".to_string(), section_1);
         sections.insert("section_2".to_string(), section_2);
 
-        Ok(ConfigurableManifest::new(
-            format!("{} Server", flavour.to_string()),
-            None,
-            false,
-            false,
-            sections,
-        ))
-    }
-
-    pub async fn validate_section(
-        flavour: &FlavourKind,
-        section_id: &str,
-        section_value: &SectionManifestValue,
-    ) -> Result<(), Error> {
-        let manifest = Self::setup_manifest(flavour).await?;
-        if let Some(section) = manifest.get_section(section_id) {
-            section.validate_section(section_value)?;
-            Ok(())
-        } else {
-            Err(eyre!("Section {} does not exist", section_id).into())
-        }
+        Ok(SetupManifest {
+            setting_sections: sections,
+        })
     }
 
     pub async fn construct_setup_config(
-        manifest_value: ManifestValue,
+        setup_value: SetupValue,
         flavour: FlavourKind,
     ) -> Result<SetupConfig, Error> {
         Self::setup_manifest(&flavour)
             .await?
-            .validate_manifest_value(&manifest_value)?;
+            .validate_setup_value(&setup_value)?;
 
         // ALL of the following unwraps are safe because we just validated the manifest value
-        let description = manifest_value
-            .get_unique_setting("description")
-            .unwrap()
-            .get_value()
-            .map(|v| v.try_as_string().unwrap());
+        let description = setup_value.description.clone();
 
-        let name = manifest_value
-            .get_unique_setting("name")
-            .unwrap()
-            .get_value()
-            .unwrap()
-            .try_as_string()
-            .unwrap();
+        let name = setup_value.name.clone();
 
-        let version = manifest_value
+        let version = setup_value
             .get_unique_setting("version")
             .unwrap()
             .get_value()
@@ -396,7 +345,7 @@ impl MinecraftJavaInstance {
             .try_as_enum()
             .unwrap();
 
-        let port = manifest_value
+        let port = setup_value
             .get_unique_setting("port")
             .unwrap()
             .get_value()
@@ -404,7 +353,7 @@ impl MinecraftJavaInstance {
             .try_as_unsigned_integer()
             .unwrap();
 
-        let min_ram = manifest_value
+        let min_ram = setup_value
             .get_unique_setting("min_ram")
             .unwrap()
             .get_value()
@@ -412,7 +361,7 @@ impl MinecraftJavaInstance {
             .try_as_unsigned_integer()
             .unwrap();
 
-        let max_ram = manifest_value
+        let max_ram = setup_value
             .get_unique_setting("max_ram")
             .unwrap()
             .get_value()
@@ -420,7 +369,7 @@ impl MinecraftJavaInstance {
             .try_as_unsigned_integer()
             .unwrap();
 
-        let cmd_args: Vec<String> = manifest_value
+        let cmd_args: Vec<String> = setup_value
             .get_unique_setting("cmd_args")
             .unwrap()
             .get_value()
@@ -431,17 +380,16 @@ impl MinecraftJavaInstance {
             .collect();
 
         Ok(SetupConfig {
-            name: name.clone(),
-            description: description.cloned(),
+            name,
+            description,
             version: version.clone(),
             port,
             min_ram: Some(min_ram),
             max_ram: Some(max_ram),
             cmd_args,
             flavour: flavour.into(),
-            auto_start: Some(manifest_value.get_auto_start()),
-            restart_on_crash: Some(manifest_value.get_restart_on_crash()),
-            start_on_connection: Some(manifest_value.get_start_on_connection()),
+            auto_start: Some(setup_value.auto_start),
+            restart_on_crash: Some(setup_value.restart_on_crash),
             backup_period: None,
         })
     }
@@ -486,13 +434,7 @@ impl MinecraftJavaInstance {
             server_properties_section_manifest,
         );
 
-        ConfigurableManifest::new(
-            restore_config.name.clone(),
-            Some(restore_config.description.clone()),
-            false,
-            false,
-            setting_sections,
-        )
+        ConfigurableManifest::new(false, false, setting_sections)
     }
 
     pub async fn new(
@@ -550,14 +492,12 @@ impl MinecraftJavaInstance {
             .join(format!("jre{}", jre_major_version))
             .exists()
         {
-            let _progression_parent_id = progression_event_id;
             let downloaded = download_file(
                 &url,
                 &path_to_runtimes.join("java"),
                 None,
                 {
                     let event_broadcaster = event_broadcaster.clone();
-                    let _uuid = uuid.clone();
                     let progression_event_id = progression_event_id;
                     &move |dl| {
                         if let Some(total) = dl.total {

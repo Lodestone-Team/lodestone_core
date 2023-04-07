@@ -1,17 +1,19 @@
 use crate::error::Error;
+use crate::implementations::generic;
 use crate::implementations::minecraft_java;
 use crate::minecraft_java::FlavourKind;
-use crate::traits::t_configurable::manifest::ConfigurableManifest;
-use crate::traits::t_configurable::manifest::SectionManifestValue;
+use crate::traits::t_configurable::manifest::SetupManifest;
 use crate::traits::t_configurable::GameType;
+use crate::AppState;
 use axum::extract::Path;
 use axum::routing::get;
-use axum::routing::put;
 use axum::Json;
 use axum::Router;
+use axum::routing::put;
 use serde::Deserialize;
 use serde::Serialize;
 use ts_rs::TS;
+
 #[allow(clippy::enum_variant_names)]
 #[derive(Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -59,29 +61,34 @@ pub async fn get_available_games() -> Json<Vec<HandlerGameType>> {
 
 pub async fn get_setup_manifest(
     Path(game_type): Path<HandlerGameType>,
-) -> Result<Json<ConfigurableManifest>, Error> {
-    Ok(Json(
-        minecraft_java::MinecraftJavaInstance::setup_manifest(&game_type.into()).await?,
-    ))
+) -> Result<Json<SetupManifest>, Error> {
+    minecraft_java::MinecraftJavaInstance::setup_manifest(&game_type.into())
+        .await
+        .map(Json)
 }
 
-pub async fn validate_section(
-    Path((game_type, section_id)): Path<(HandlerGameType, String)>,
-    Json(section): Json<SectionManifestValue>,
-) -> Result<Json<()>, Error> {
-    Ok(Json(
-        minecraft_java::MinecraftJavaInstance::validate_section(&game_type.into(), &section_id, &section)
-            .await?,
-    ))
+#[derive(Deserialize)]
+pub struct GenericSetupManifestBody {
+    pub url: String,
 }
 
-pub fn get_instance_setup_config_routes() -> Router {
+pub async fn get_generic_setup_manifest(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<GenericSetupManifestBody>,
+) -> Result<Json<SetupManifest>, Error> {
+    generic::GenericInstance::setup_manifest(&body.url, state.macro_executor)
+        .await
+        .map(Json)
+}
+
+
+pub fn get_instance_setup_config_routes(appstate: AppState) -> Router {
     Router::new()
         .route("/games", get(get_available_games))
         .route("/setup_manifest/:game_type", get(get_setup_manifest))
         .route(
-            "/setup_manifest/:game_type/:section_id",
-            put(validate_section),
+            "/generic_setup_manifest",
+            put(get_generic_setup_manifest),
         )
-        .with_state(())
+        .with_state(appstate)
 }
