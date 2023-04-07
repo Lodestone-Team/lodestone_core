@@ -171,51 +171,12 @@ impl MinecraftBedrockInstance {
             true,
         );
 
-        let min_ram_setting = SettingManifest::new_required_value(
-            "min_ram".to_string(),
-            "Minimum RAM".to_string(),
-            "The minimum amount of RAM to allocate to the server".to_string(),
-            ConfigurableValue::UnsignedInteger(1024),
-            Some(ConfigurableValue::UnsignedInteger(1024)),
-            false,
-            true,
-        );
-
-        let max_ram_setting = SettingManifest::new_required_value(
-            "max_ram".to_string(),
-            "Maximum RAM".to_string(),
-            "The maximum amount of RAM to allocate to the server".to_string(),
-            ConfigurableValue::UnsignedInteger(2048),
-            Some(ConfigurableValue::UnsignedInteger(2048)),
-            false,
-            true,
-        );
-
-        let command_line_args_setting = SettingManifest::new_optional_value(
-            "cmd_args".to_string(),
-            "Command Line Arguments".to_string(),
-            "Command line arguments to pass to the server".to_string(),
-            None,
-            ConfigurableValueType::String { regex: None },
-            None,
-            false,
-            true,
-        );
-
         let mut section_1_map = IndexMap::new();
         section_1_map.insert("name".to_string(), name_setting);
         section_1_map.insert("description".to_string(), description_setting);
 
         section_1_map.insert("version".to_string(), version_setting);
         section_1_map.insert("port".to_string(), port_setting);
-
-        let mut section_2_map = IndexMap::new();
-
-        section_2_map.insert("min_ram".to_string(), min_ram_setting);
-
-        section_2_map.insert("max_ram".to_string(), max_ram_setting);
-
-        section_2_map.insert("cmd_args".to_string(), command_line_args_setting);
 
         let section_1 = SectionManifest::new(
             "section_1".to_string(),
@@ -224,17 +185,9 @@ impl MinecraftBedrockInstance {
             section_1_map,
         );
 
-        let section_2 = SectionManifest::new(
-            "section_2".to_string(),
-            "Advanced Settings".to_string(),
-            "Advanced settings for your minecraft server.".to_string(),
-            section_2_map,
-        );
-
         let mut sections = IndexMap::new();
 
         sections.insert("section_1".to_string(), section_1);
-        sections.insert("section_2".to_string(), section_2);
 
         Ok(SetupManifest {
             setting_sections: sections,
@@ -268,7 +221,7 @@ impl MinecraftBedrockInstance {
             .unwrap()
             .get_value()
             .unwrap()
-            .try_as_enum()
+            .try_as_string()
             .unwrap();
 
         let port = setup_value
@@ -290,9 +243,7 @@ impl MinecraftBedrockInstance {
         })
     }
 
-    fn init_configurable_manifest(
-        restore_config: &RestoreConfig,
-    ) -> ConfigurableManifest {
+    fn init_configurable_manifest() -> ConfigurableManifest {
         let server_properties_section_manifest = SectionManifest::new(
             ServerPropertySetting::get_section_id().to_string(),
             "Server Properties Settings".to_string(),
@@ -642,9 +593,7 @@ impl MinecraftBedrockInstance {
         });
 
 
-        let configurable_manifest = Arc::new(Mutex::new(Self::init_configurable_manifest(
-            &restore_config,
-        )));
+        let configurable_manifest = Arc::new(Mutex::new(Self::init_configurable_manifest()));
 
         let mut instance = MinecraftBedrockInstance {
             state: Arc::new(Mutex::new(State::Stopped)),

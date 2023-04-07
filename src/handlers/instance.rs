@@ -70,7 +70,7 @@ pub async fn get_instance_info(
 pub async fn create_minecraft_bedrock_instance(
     axum::extract::State(state): axum::extract::State<AppState>,
     AuthBearer(token): AuthBearer,
-    Json(manifest_value): Json<SetupValue>,
+    Json(setup_value): Json<SetupValue>,
 ) -> Result<Json<InstanceUuid>, Error> {
     let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
     requester.try_action(&UserAction::CreateInstance)?;
@@ -87,7 +87,7 @@ pub async fn create_minecraft_bedrock_instance(
 
     let instance_uuid = instance_uuid;
 
-    let setup_config = MinecraftBedrockInstance::construct_setup_config(manifest_value).await?;
+    let setup_config = MinecraftBedrockInstance::construct_setup_config(setup_value).await?;
 
     let setup_path = PATH_TO_INSTANCES.with(|path| {
         path.join(format!(
