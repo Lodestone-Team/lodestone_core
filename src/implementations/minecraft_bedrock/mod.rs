@@ -10,6 +10,7 @@ use crate::event_broadcaster::EventBroadcaster;
 use crate::traits::t_configurable::GameType;
 
 use std::collections::HashMap;
+use std::f32::consts::E;
 use async_trait::async_trait;
 use color_eyre::eyre::{eyre, Context, ContextCompat};
 use enum_kinds::EnumKind;
@@ -45,7 +46,7 @@ use crate::traits::t_configurable::manifest::{
     SettingManifest, SetupManifest, SetupValue,
 };
 
-use self::util::{get_server_zip_url, get_minecraft_bedrock_version, read_properties_from_path};
+use self::util::{get_latest_zip_url, read_properties_from_path};
 use self::configurable::ServerPropertySetting;
 
 use crate::traits::t_macro::TaskEntry;
@@ -62,6 +63,7 @@ use self::players_manager::PlayersManager;
 pub struct SetupConfig {
     pub name: String,
     pub version: String,
+    pub version_url: Option<String>,
     pub port: u32,
     pub description: Option<String>,
     pub auto_start: Option<bool>,
@@ -124,8 +126,6 @@ enum BackupInstruction {
 
 impl MinecraftBedrockInstance { 
     pub async fn setup_manifest() -> Result<SetupManifest, Error> {
-        let version = get_minecraft_bedrock_version().await?;
-
         let name_setting = SettingManifest::new_required_value(
             "name".to_string(),
             "Server Name".to_string(),
@@ -151,7 +151,18 @@ impl MinecraftBedrockInstance {
             "version".to_string(),
             "Version".to_string(),
             "The version of minecraft to use".to_string(),
-            ConfigurableValue::String(version.clone()),
+            ConfigurableValue::String("Latest".to_string()),
+            None,
+            false,
+            true,
+        );
+
+        let version_url_setting = SettingManifest::new_optional_value(
+            "version".to_string(),
+            "Version".to_string(),
+            "The url to download the server.zip when not using Latest version".to_string(),
+            None,
+            ConfigurableValueType::String { regex: None },
             None,
             false,
             true,
@@ -176,6 +187,7 @@ impl MinecraftBedrockInstance {
         section_1_map.insert("description".to_string(), description_setting);
 
         section_1_map.insert("version".to_string(), version_setting);
+        section_1_map.insert("version_url".to_string(), version_url_setting);
         section_1_map.insert("port".to_string(), port_setting);
 
         let section_1 = SectionManifest::new(
@@ -224,6 +236,12 @@ impl MinecraftBedrockInstance {
             .try_as_string()
             .unwrap();
 
+        let version_url = setup_value
+            .get_unique_setting("version_url")
+            .unwrap()
+            .get_value()
+            .map(|v| v.try_as_string().unwrap());
+
         let port = setup_value
             .get_unique_setting("port")
             .unwrap()
@@ -236,6 +254,7 @@ impl MinecraftBedrockInstance {
             name: name.clone(),
             description: description.cloned(),
             version: version.clone(),
+            version_url: version_url.cloned(),
             port,
             auto_start: Some(setup_value.auto_start),
             restart_on_crash: Some(setup_value.restart_on_crash),
@@ -332,16 +351,14 @@ impl MinecraftBedrockInstance {
         event_broadcaster: EventBroadcaster,
         macro_executor: MacroExecutor,
     ) -> Result<MinecraftBedrockInstance, Error> {
-        // Step 2: Download server zip
-        let server_zip_url = get_server_zip_url(&config.version)
-            .await
-            .ok_or_else({
-                || {
-                    eyre!(
-                        "Could get the server zip url, this is a bug, please report it",
-                    )
-                }
-            })?;
+        // Step 1: Download server zip
+
+        let server_zip_url = if config.version == "latest" {
+            get_latest_zip_url()
+            .await?
+        } else {
+            config.version_url.unwrap().clone()
+        };
 
         let server_zip = download_file(
             server_zip_url.as_str(),
@@ -628,47 +645,6 @@ impl MinecraftBedrockInstance {
             .context("Failed to read properties")?;
         Ok(instance)
     }
-}
-
-#[tokio::test]
-async fn test_setup_server() {
-
-    let setup_conf = SetupConfig {
-        name: String::from("test"),
-        version: String::from("1.19.71.02"),
-        port: 25567,
-        description: Some(String::from("test")),
-        auto_start: Some(false),
-        restart_on_crash: Some(true),
-        backup_period: Some(0),
-    };
-
-    let lodestone_conf = DotLodestoneConfig::new(
-        Default::default(), 
-        GameType::MinecraftBedrock,
-    );
-
-    let (event_broadcaster, _) = EventBroadcaster::new(10);
-    let macro_executor = MacroExecutor::new(event_broadcaster.clone());
-        // config: SetupConfig,
-        // dot_lodestone_config: DotLodestoneConfig,
-        // path_to_instance: PathBuf,
-        // progression_event_id: Snowflake,
-        // event_broadcaster: Sender<Event>,
-        // macro_executor: MacroExecutor,
-    let mut instance = MinecraftBedrockInstance::new(
-        setup_conf,
-        lodestone_conf,
-        PathBuf::from(r"D:\Programming\gamerinstance"),
-        Snowflake::default(),
-        event_broadcaster,
-        macro_executor,
-    ).await.unwrap();
-
-    let caused_by = CausedBy::Unknown;
-
-    instance.start(caused_by, false).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_secs(500)).await;
 }
 
 impl TInstance for MinecraftBedrockInstance {}

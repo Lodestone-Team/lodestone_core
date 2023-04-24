@@ -54,9 +54,6 @@ impl TServer for MinecraftBedrockInstance {
             "Failed to set current directory to the instance's path, is the path valid?",
         )?;
 
-        // skip prelaunch part
-
-        // write server_settings to server.properties
         
         let mut server_start_command = Command::new(self
             .path_to_instance

@@ -3,6 +3,8 @@ use indexmap::IndexMap;
 use serde_json::{self, Value};
 use std::{collections::BTreeMap, path::Path, str::FromStr};
 use tokio::io::AsyncBufReadExt;
+use reqwest;
+use scraper::{Html, Selector};
 
 use crate::error::Error;
 
@@ -45,11 +47,31 @@ pub async fn read_properties_from_path(
     Ok(ret)
 }
 
-// Returns the jar url and the updated flavour with version information
-pub async fn get_server_zip_url(version: &str) -> Option<String> {
-    Some(format!("https://minecraft.azureedge.net/bin-win/bedrock-server-{version}.zip"))
+pub async fn get_latest_zip_url() -> Result<String, Error> {
+    let html_doc = reqwest::get("https://www.minecraft.net/en-us/download/server/bedrock/")
+        .await
+        .map_err(|_| eyre!("Failed to fetch the bedrock server html"))?
+        .text()
+        .await
+        .unwrap();
+
+    let html = Html::parse_document(&html_doc);
+
+    let link_selector = Selector::parse("a.downloadlink[data-platform=serverBedrockWindows]").unwrap();
+    let href_attr = "href";
+    let link = html.select(&link_selector).next().unwrap();
+
+    let href = link.value().attr(href_attr).unwrap();
+
+    let url = reqwest::Url::parse(href).unwrap();
+
+    Ok(url.to_string())
 }
 
-pub async fn get_minecraft_bedrock_version() -> Result<String, Error> {
-    Ok(String::from("1.19.71.02"))
+
+#[test]
+fn test_get_latest() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let url = rt.block_on(get_latest_zip_url()).unwrap();
+    println!("{}", url);
 }
