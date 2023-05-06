@@ -320,7 +320,7 @@ pub async fn get_forge_jar_url(
 
     let response: BTreeMap<String, Vec<String>> = serde_json::from_str(
         client
-            .get("https://files.MinecraftJavaForge.net/net/MinecraftJavaForge/forge/maven-metadata.json")
+            .get("https://files.MinecraftForge.net/net/MinecraftForge/forge/maven-metadata.json")
             .send()
             .await
             .context("Failed to get forge versions, http request failed")?
@@ -343,7 +343,7 @@ pub async fn get_forge_jar_url(
 
     Ok((
         format!(
-            "https://maven.MinecraftJavaForge.net/net/MinecraftJavaForge/forge/{}/forge-{}-installer.jar",
+            "https://maven.MinecraftForge.net/net/MinecraftForge/forge/{}/forge-{}-installer.jar",
             build, build
         ),
         Flavour::Forge {
@@ -439,7 +439,7 @@ pub async fn name_to_uuid(name: impl AsRef<str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::minecraft_java::{
+    use crate::minecraft::{
         util::{get_forge_jar_url, get_server_jar_url},
         FabricInstallerVersion, FabricLoaderVersion, Flavour, ForgeBuildVersion, PaperBuildVersion,
     };
@@ -509,7 +509,7 @@ mod tests {
         assert_eq!(
             get_forge_jar_url("1.18.2", &None).await.unwrap(),
             (
-                "https://maven.MinecraftJavaForge.net/net/MinecraftJavaForge/forge/1.18.2-40.2.1/forge-1.18.2-40.2.1-installer.jar".to_string(),
+                "https://maven.MinecraftForge.net/net/MinecraftForge/forge/1.18.2-40.2.1/forge-1.18.2-40.2.1-installer.jar".to_string(),
                 Flavour::Forge { build_version: Some(ForgeBuildVersion("1.18.2-40.2.1".to_string())) }
             )
         );
@@ -520,14 +520,14 @@ mod tests {
         assert_eq!(
             get_server_jar_url("1.7.10", &Flavour::Forge { build_version: None }).await,
             Some((
-                "https://maven.MinecraftJavaForge.net/net/MinecraftJavaForge/forge/1.7.10-10.13.4.1614-1.7.10/forge-1.7.10-10.13.4.1614-1.7.10-installer.jar".to_string(),
+                "https://maven.MinecraftForge.net/net/MinecraftForge/forge/1.7.10-10.13.4.1614-1.7.10/forge-1.7.10-10.13.4.1614-1.7.10-installer.jar".to_string(),
                 Flavour::Forge { build_version: Some(ForgeBuildVersion("1.7.10-10.13.4.1614-1.7.10".to_string())) }
             ))
         );
         assert_eq!(
             get_server_jar_url("1.7.10_pre4", &Flavour::Forge { build_version: None }).await,
             Some((
-                "https://maven.MinecraftJavaForge.net/net/MinecraftJavaForge/forge/1.7.10_pre4-10.12.2.1149-prerelease/forge-1.7.10_pre4-10.12.2.1149-prerelease-installer.jar".to_string(),
+                "https://maven.MinecraftForge.net/net/MinecraftForge/forge/1.7.10_pre4-10.12.2.1149-prerelease/forge-1.7.10_pre4-10.12.2.1149-prerelease-installer.jar".to_string(),
                 Flavour::Forge { build_version: Some(ForgeBuildVersion("1.7.10_pre4-10.12.2.1149-prerelease".to_string())) }
             ))
         );

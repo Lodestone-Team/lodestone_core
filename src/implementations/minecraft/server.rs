@@ -9,12 +9,12 @@ use tokio::process::Command;
 
 use crate::error::{Error, ErrorKind};
 use crate::events::{CausedBy, Event, EventInner, InstanceEvent, InstanceEventInner};
-use crate::implementations::minecraft_java::line_parser::{
+use crate::implementations::minecraft::line_parser::{
     parse_player_joined, parse_player_left, parse_player_msg, parse_server_started,
     parse_system_msg, PlayerMessage,
 };
-use crate::implementations::minecraft_java::player::MinecraftJavaPlayer;
-use crate::implementations::minecraft_java::util::name_to_uuid;
+use crate::implementations::minecraft::player::MinecraftPlayer;
+use crate::implementations::minecraft::util::name_to_uuid;
 use crate::traits::t_configurable::TConfigurable;
 use crate::traits::t_macro::TaskEntry;
 use crate::traits::t_server::{MonitorReport, State, StateAction, TServer};
@@ -23,11 +23,11 @@ use crate::types::Snowflake;
 use crate::util::{dont_spawn_terminal, list_dir};
 
 use super::r#macro::{resolve_macro_invocation, MinecraftMainWorkerGenerator};
-use super::{Flavour, ForgeBuildVersion, MinecraftJavaInstance};
+use super::{Flavour, ForgeBuildVersion, MinecraftInstance};
 use tracing::{error, info, warn};
 
 #[async_trait::async_trait]
-impl TServer for MinecraftJavaInstance {
+impl TServer for MinecraftInstance {
     async fn start(&mut self, cause_by: CausedBy, block: bool) -> Result<(), Error> {
         let config = self.config.lock().await.clone();
         self.state.lock().await.try_transition(
@@ -391,7 +391,7 @@ impl TServer for MinecraftJavaInstance {
                                 });
                                 if let Some(player_name) = parse_player_joined(&system_msg) {
                                     players_manager.lock().await.add_player(
-                                        MinecraftJavaPlayer {
+                                        MinecraftPlayer {
                                             name: player_name.clone(),
                                             uuid: name_to_uuid(&player_name).await,
                                         },

@@ -16,9 +16,9 @@ use crate::events::{
 use crate::implementations::generic;
 use crate::traits::t_configurable::GameType;
 
-use minecraft_java::FlavourKind;
+use minecraft::FlavourKind;
 
-use crate::implementations::minecraft_java::MinecraftJavaInstance;
+use crate::implementations::minecraft::MinecraftInstance;
 use crate::implementations::minecraft_bedrock::MinecraftBedrockInstance;
 
 use crate::prelude::PATH_TO_INSTANCES;
@@ -26,7 +26,7 @@ use crate::traits::t_configurable::manifest::SetupValue;
 use crate::traits::{t_configurable::TConfigurable, t_server::TServer, InstanceInfo, TInstance};
 
 use crate::types::{DotLodestoneConfig, InstanceUuid, Snowflake};
-use crate::{implementations::minecraft_java, traits::t_server::State, AppState};
+use crate::{implementations::minecraft, traits::t_server::State, AppState};
 
 use super::instance_setup_configs::HandlerGameType;
 
@@ -205,7 +205,7 @@ pub async fn create_minecraft_bedrock_instance(
 }
 
 
-pub async fn create_minecraft_java_instance(
+pub async fn create_minecraft_instance(
     axum::extract::State(state): axum::extract::State<AppState>,
     AuthBearer(token): AuthBearer,
     Path(game_type): Path<HandlerGameType>,
@@ -227,14 +227,14 @@ pub async fn create_minecraft_java_instance(
     let instance_uuid = instance_uuid;
 
     let flavour = match game_type {
-        HandlerGameType::MinecraftJavaVanilla => Some(FlavourKind::Vanilla),
-        HandlerGameType::MinecraftJavaForge => Some(FlavourKind::Forge),
-        HandlerGameType::MinecraftJavaFabric => Some(FlavourKind::Fabric),
-        HandlerGameType::MinecraftJavaPaper => Some(FlavourKind::Paper),
+        HandlerGameType::MinecraftVanilla => Some(FlavourKind::Vanilla),
+        HandlerGameType::MinecraftForge => Some(FlavourKind::Forge),
+        HandlerGameType::MinecraftFabric => Some(FlavourKind::Fabric),
+        HandlerGameType::MinecraftPaper => Some(FlavourKind::Paper),
         _ => None,
     }.unwrap();
 
-    let setup_config = MinecraftJavaInstance::construct_setup_config(manifest_value, flavour).await?;
+    let setup_config = MinecraftInstance::construct_setup_config(manifest_value, flavour).await?;
 
     let setup_path = PATH_TO_INSTANCES.with(|path| {
         path.join(format!(
@@ -291,7 +291,7 @@ pub async fn create_minecraft_java_instance(
                 snowflake: Snowflake::default(),
                 caused_by: caused_by.clone(),
             });
-            let minecraft_instance = match minecraft_java::MinecraftJavaInstance::new(
+            let minecraft_instance = match minecraft::MinecraftInstance::new(
                 setup_config.clone(),
                 dot_lodestone_config,
                 setup_path.clone(),
@@ -533,7 +533,7 @@ pub fn get_instance_routes(state: AppState) -> Router {
         .route("/instance/list", get(get_instance_list))
         .route(
             "/instance/create/:game_type",
-            post(create_minecraft_java_instance),
+            post(create_minecraft_instance),
         )
         .route(
             "/instance/create_bedrock",

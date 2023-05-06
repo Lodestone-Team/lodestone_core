@@ -18,18 +18,18 @@ use crate::{
     },
 };
 
-use super::MinecraftJavaInstance;
+use super::MinecraftInstance;
 
 #[op]
 async fn send_stdin(state: Rc<RefCell<OpState>>, cmd: String) -> Result<(), anyhow::Error> {
-    let instance = state.borrow().borrow::<MinecraftJavaInstance>().clone();
+    let instance = state.borrow().borrow::<MinecraftInstance>().clone();
     instance.send_command(&cmd, CausedBy::Unknown).await?;
     Ok(())
 }
 
 #[op]
 async fn send_rcon(state: Rc<RefCell<OpState>>, cmd: String) -> Result<String, anyhow::Error> {
-    let instance = state.borrow().borrow::<MinecraftJavaInstance>().clone();
+    let instance = state.borrow().borrow::<MinecraftInstance>().clone();
     let ret = instance.send_rcon(&cmd).await?;
     Ok(ret)
 }
@@ -39,7 +39,7 @@ async fn on_event(
     state: Rc<RefCell<OpState>>,
     event: String,
 ) -> Result<Option<String>, anyhow::Error> {
-    let instance = state.borrow().borrow::<MinecraftJavaInstance>().clone();
+    let instance = state.borrow().borrow::<MinecraftInstance>().clone();
     let mut event_rx = instance.event_broadcaster.subscribe();
     if event == "playerMessage" {
         while let Ok(event) = event_rx.recv().await {
@@ -154,11 +154,11 @@ pub fn resolve_macro_invocation(
 }
 
 pub struct MinecraftMainWorkerGenerator {
-    instance: MinecraftJavaInstance,
+    instance: MinecraftInstance,
 }
 
 impl MinecraftMainWorkerGenerator {
-    pub fn new(instance: MinecraftJavaInstance) -> Self {
+    pub fn new(instance: MinecraftInstance) -> Self {
         Self { instance }
     }
 }
@@ -218,7 +218,7 @@ impl MainWorkerGenerator for MinecraftMainWorkerGenerator {
 }
 
 #[async_trait]
-impl TMacro for MinecraftJavaInstance {
+impl TMacro for MinecraftInstance {
     async fn get_macro_list(&self) -> Result<Vec<MacroEntry>, Error> {
         let mut ret = Vec::new();
         for entry in

@@ -8,22 +8,22 @@ use crate::traits::t_player::{TPlayer, TPlayerManagement};
 use crate::Error;
 
 use super::configurable::ServerPropertySetting;
-use super::MinecraftJavaInstance;
+use super::MinecraftInstance;
 
 #[derive(Eq, Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct MinecraftJavaPlayer {
+pub struct MinecraftPlayer {
     pub name: String,
     pub uuid: Option<String>,
 }
 
-impl MinecraftJavaPlayer {
+impl MinecraftPlayer {
     pub fn new(name: String, uuid: Option<String>) -> Self {
         Self { name, uuid }
     }
 }
 
-impl PartialEq for MinecraftJavaPlayer {
+impl PartialEq for MinecraftPlayer {
     fn eq(&self, other: &Self) -> bool {
         // if uuid is not set, compare by name
         if self.uuid.is_none() || other.uuid.is_none() {
@@ -35,13 +35,13 @@ impl PartialEq for MinecraftJavaPlayer {
 }
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-impl Hash for MinecraftJavaPlayer {
+impl Hash for MinecraftPlayer {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.uuid.hash(state);
     }
 }
 
-impl TPlayer for MinecraftJavaPlayer {
+impl TPlayer for MinecraftPlayer {
     fn get_id(&self) -> String {
         self.uuid.clone().unwrap_or_else(|| self.name.clone())
     }
@@ -52,7 +52,7 @@ impl TPlayer for MinecraftJavaPlayer {
 }
 
 #[async_trait]
-impl TPlayerManagement for MinecraftJavaInstance {
+impl TPlayerManagement for MinecraftInstance {
     async fn get_player_count(&self) -> Result<u32, Error> {
         Ok(self.players_manager.lock().await.count())
     }

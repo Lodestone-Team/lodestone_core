@@ -12,9 +12,9 @@ use self::manifest::ConfigurableManifest;
 use self::manifest::ConfigurableValue;
 use crate::error::Error;
 use crate::error::ErrorKind;
-use crate::implementations::minecraft_java::Flavour;
+use crate::implementations::minecraft::Flavour;
 use crate::traits::GameInstance;
-use crate::traits::MinecraftJavaInstance;
+use crate::traits::MinecraftInstance;
 use crate::traits::MinecraftBedrockInstance;
 use crate::traits::GenericInstance;
 
@@ -37,7 +37,7 @@ pub enum MinecraftVariant {
 #[serde(tag = "type")]
 #[ts(export)]
 pub enum Game {
-    MinecraftJava {
+    Minecraft {
         variant: MinecraftVariant,
     },
     MinecraftBedrock { },
@@ -55,19 +55,19 @@ fn export_game_type() {
 impl From<Flavour> for Game {
     fn from(value: Flavour) -> Self {
         match value {
-            Flavour::Vanilla => Self::MinecraftJava {
+            Flavour::Vanilla => Self::Minecraft {
                 variant: MinecraftVariant::Vanilla,
             },
-            Flavour::Fabric { .. } => Self::MinecraftJava {
+            Flavour::Fabric { .. } => Self::Minecraft {
                 variant: MinecraftVariant::Fabric,
             },
-            Flavour::Paper { .. } => Self::MinecraftJava {
+            Flavour::Paper { .. } => Self::Minecraft {
                 variant: MinecraftVariant::Paper,
             },
-            Flavour::Spigot => Self::MinecraftJava {
+            Flavour::Spigot => Self::Minecraft {
                 variant: MinecraftVariant::Spigot,
             },
-            Flavour::Forge { .. } => Self::MinecraftJava {
+            Flavour::Forge { .. } => Self::Minecraft {
                 variant: MinecraftVariant::Forge,
             },
         }

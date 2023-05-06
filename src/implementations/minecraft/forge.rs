@@ -7,7 +7,7 @@ use crate::error::Error;
 pub async fn get_forge_minecraft_versions() -> Result<Vec<String>, Error> {
     let http = reqwest::Client::new();
     let response: IndexMap<String, Value> = serde_json::from_str(
-        http.get("https://files.MinecraftJavaForge.net/net/MinecraftJavaForge/forge/maven-metadata.json")
+        http.get("https://files.MinecraftForge.net/net/MinecraftForge/forge/maven-metadata.json")
             .send()
             .await
             .context("Failed to get forge versions, http request failed")?

@@ -6,7 +6,7 @@ use color_eyre::eyre::Context;
 
 use tracing::debug;
 
-use crate::{error::Error, implementations::minecraft_java::Flavour, types::InstanceUuid};
+use crate::{error::Error, implementations::minecraft::Flavour, types::InstanceUuid};
 
 #[derive(serde::Deserialize, Clone)]
 pub struct RestoreConfigV042 {
@@ -60,7 +60,7 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        implementations::minecraft_java::{Flavour, RestoreConfig},
+        implementations::minecraft::{Flavour, RestoreConfig},
         traits::t_configurable::GameType,
         types::DotLodestoneConfig,
     };
@@ -128,7 +128,7 @@ mod tests {
         assert_eq!(new_dot_lodestone_config.lodestone_version(), "0.4.3");
         assert_eq!(
             new_dot_lodestone_config.game_type(),
-            &GameType::MinecraftJava
+            &GameType::Minecraft
         );
 
         assert_eq!(

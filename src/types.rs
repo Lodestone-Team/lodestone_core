@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::traits::t_configurable::GameType;
 use crate::{
-    implementations::minecraft_java::Flavour,
+    implementations::minecraft::Flavour,
     migration::RestoreConfigV042,
     prelude::{SNOWFLAKE_GENERATOR, VERSION},
 };
@@ -131,10 +131,10 @@ pub struct DotLodestoneConfig {
 impl From<RestoreConfigV042> for DotLodestoneConfig {
     fn from(config: RestoreConfigV042) -> Self {
         let game_type = match (config.game_type.as_str(), config.flavour) {
-            ("minecraft", Flavour::Vanilla) => GameType::MinecraftJava,
-            ("minecraft", Flavour::Forge { .. }) => GameType::MinecraftJava,
-            ("minecraft", Flavour::Fabric { .. }) => GameType::MinecraftJava,
-            ("minecraft", Flavour::Paper { .. }) => GameType::MinecraftJava,
+            ("minecraft", Flavour::Vanilla) => GameType::Minecraft,
+            ("minecraft", Flavour::Forge { .. }) => GameType::Minecraft,
+            ("minecraft", Flavour::Fabric { .. }) => GameType::Minecraft,
+            ("minecraft", Flavour::Paper { .. }) => GameType::Minecraft,
             _ => panic!("Unknown game type: {}", config.game_type),
         };
         Self {

@@ -34,7 +34,7 @@ lazy_static! {
         ));
 }
 
-use crate::minecraft_java::MinecraftJavaInstance;
+use crate::minecraft::MinecraftInstance;
 use crate::minecraft_bedrock::MinecraftBedrockInstance;
 use crate::generic::GenericInstance;
 #[enum_dispatch::enum_dispatch(
@@ -48,7 +48,7 @@ use crate::generic::GenericInstance;
 )]
 #[derive(Clone)]
 pub enum GameInstance {
-    MinecraftJavaInstance,
+    MinecraftInstance,
     MinecraftBedrockInstance,
     GenericInstance,
 }

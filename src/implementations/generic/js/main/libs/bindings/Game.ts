@@ -2,4 +2,4 @@
 import type { GameType } from "./GameType.ts";
 import type { MinecraftVariant } from "./MinecraftVariant.ts";
 
-export type Game = { type: "MinecraftJava", variant: MinecraftVariant, } | { type: "Generic", game_name: GameType, game_display_name: string, };
+export type Game = { type: "Minecraft", variant: MinecraftVariant, } | { type: "Generic", game_name: GameType, game_display_name: string, };
