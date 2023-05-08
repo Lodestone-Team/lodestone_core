@@ -5,7 +5,7 @@ ARG binpath=./release/main
 
 #
 RUN apt-get update \
-  && apt-get install -y ca-certificates \
+  && apt-get install -y ca-certificates libssl-dev libsasl2-dev \
   && update-ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
