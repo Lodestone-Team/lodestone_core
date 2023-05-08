@@ -49,7 +49,7 @@ jobs:
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ fromJson('{ ubuntu-latest: "x86_64-unknown-linux-gnu", windows-latest: "windows-client" }')[matrix.os]}}-client
+          key: ${{ fromJson('{ "ubuntu-latest": "x86_64-unknown-linux-gnu", "windows-latest": "windows" }')[matrix.os] }}-client
       - name: Cargo Test Backend
         uses: actions-rs/cargo@v1
         with:
