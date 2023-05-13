@@ -36,6 +36,7 @@ lazy_static! {
 
 use crate::generic::GenericInstance;
 use crate::minecraft::MinecraftInstance;
+use crate::minecraft_bedrock::MinecraftBedrockInstance;
 #[enum_dispatch::enum_dispatch(
     TInstance,
     TConfigurable,
@@ -48,5 +49,6 @@ use crate::minecraft::MinecraftInstance;
 #[derive(Clone)]
 pub enum GameInstance {
     MinecraftInstance,
+    MinecraftBedrockInstance,
     GenericInstance,
 }

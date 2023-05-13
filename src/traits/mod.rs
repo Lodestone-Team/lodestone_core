@@ -39,6 +39,7 @@ pub struct InstanceInfo {
     pub player_list: Option<HashSet<Player>>,
 }
 use crate::minecraft::MinecraftInstance;
+use crate::minecraft_bedrock::MinecraftBedrockInstance;
 use crate::generic::GenericInstance;
 use crate::prelude::GameInstance;
 use crate::types::InstanceUuid;

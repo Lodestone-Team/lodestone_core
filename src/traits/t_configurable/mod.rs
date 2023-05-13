@@ -16,6 +16,7 @@ use crate::implementations::minecraft::Flavour;
 use crate::traits::GameInstance;
 use crate::traits::GenericInstance;
 use crate::traits::MinecraftInstance;
+use crate::traits::MinecraftBedrockInstance;
 
 use crate::types::InstanceUuid;
 
@@ -39,6 +40,7 @@ pub enum Game {
     MinecraftJava {
         variant: MinecraftVariant,
     },
+    MinecraftBedrock {},
     Generic {
         game_name: GameType,       //used for identifying the "game" ("Minecraft")
         game_display_name: String, //displaying to the user what on earth this is ("MinecraftGlowstone")

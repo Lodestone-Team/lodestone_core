@@ -29,7 +29,7 @@ use error::Error;
 use events::{CausedBy, Event};
 use futures::Future;
 use global_settings::GlobalSettings;
-use implementations::{generic, minecraft};
+use implementations::{generic, minecraft, minecraft_bedrock};
 use macro_executor::MacroExecutor;
 use port_manager::PortManager;
 use prelude::GameInstance;
@@ -135,6 +135,18 @@ async fn restore_instances(
                     .await
                     .unwrap();
                     debug!("Restored Minecraft Instance successfully");
+                    ret.insert(dot_lodestone_config.uuid().to_owned(), instance.into());
+                }
+                GameType::MinecraftBedrock => {
+                    let instance = minecraft_bedrock::MinecraftBedrockInstance::restore(
+                        path.to_owned(),
+                        dot_lodestone_config.clone(),
+                        event_broadcaster.clone(),
+                        macro_executor.clone(),
+                    )
+                    .await
+                    .unwrap();
+                    debug!("Restored Minecraft Bedrock Instance successfully");
                     ret.insert(dot_lodestone_config.uuid().to_owned(), instance.into());
                 }
                 GameType::Generic => {
