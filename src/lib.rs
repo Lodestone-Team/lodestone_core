@@ -84,6 +84,7 @@ pub mod tauri_export;
 mod traits;
 pub mod types;
 pub mod util;
+mod dependency_manager;
 
 #[derive(Clone)]
 pub struct AppState {

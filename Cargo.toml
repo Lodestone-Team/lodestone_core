@@ -93,6 +93,7 @@ openssl = { version = "0.10.45", features = ["vendored"], optional = true }
 flate2 = "1.0.24"
 tar = "0.4.38"
 unrar = "0.4.4"
+serde_derive = "1.0.163"
 [dependencies.uuid]
 version = "1.1.2"
 features = [
