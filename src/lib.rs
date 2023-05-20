@@ -1,7 +1,10 @@
 #![allow(clippy::comparison_chain, clippy::type_complexity)]
 
 use crate::event_broadcaster::EventBroadcaster;
+use crate::migration::migrate;
+use crate::prelude::VERSION;
 use crate::traits::t_configurable::GameType;
+use crate::traits::t_server::State;
 use crate::{
     db::write::write_event_to_db_task,
     global_settings::GlobalSettingsData,
@@ -18,13 +21,14 @@ use crate::{
     prelude::{
         LODESTONE_PATH, PATH_TO_BINARIES, PATH_TO_GLOBAL_SETTINGS, PATH_TO_STORES, PATH_TO_USERS,
     },
-    util::{download_file, rand_alphanumeric},
+    util::rand_alphanumeric,
 };
 
 use auth::user::UsersManager;
 use axum::Router;
 
 use axum_server::tls_rustls::RustlsConfig;
+use color_eyre::eyre::Context;
 use error::Error;
 use events::{CausedBy, Event};
 use futures::Future;
@@ -45,11 +49,8 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use sysinfo::SystemExt;
-use time::macros::format_description;
+use sysinfo::{CpuExt, SystemExt};
 use tokio::{
-    fs::create_dir_all,
-    process::Command,
     select,
     sync::{broadcast::error::RecvError, Mutex, RwLock},
 };
@@ -59,12 +60,9 @@ use tower_http::{
 };
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{
-    fmt::time::LocalTime, prelude::__tracing_subscriber_SubscriberExt, EnvFilter,
-};
+use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, EnvFilter};
 use traits::{t_configurable::TConfigurable, t_server::MonitorReport, t_server::TServer};
 use types::{DotLodestoneConfig, InstanceUuid};
-use util::list_dir;
 use uuid::Uuid;
 pub mod auth;
 pub mod db;
@@ -104,74 +102,83 @@ pub struct AppState {
     sqlite_pool: sqlx::SqlitePool,
 }
 async fn restore_instances(
-    lodestone_path: &Path,
+    instances_path: &Path,
     event_broadcaster: EventBroadcaster,
     macro_executor: MacroExecutor,
-) -> HashMap<InstanceUuid, GameInstance> {
+) -> Result<HashMap<InstanceUuid, GameInstance>, Error> {
     let mut ret: HashMap<InstanceUuid, GameInstance> = HashMap::new();
 
-    for path in list_dir(&lodestone_path.join("instances"), Some(true))
-        .await
-        .unwrap()
+    for entry in instances_path
+        .read_dir()
+        .context("Failed to read instances directory")?
     {
-        if path.join(".lodestone_config").is_file() {
-            migration::migrate(&path).await.unwrap();
+        let path = match entry {
+            Ok(v) => v.path(),
+            Err(e) => {
+                error!("Error while restoring instance, failed to read instance directory : {e}");
+                continue;
+            }
+        };
+        let dot_lodestone_config_file = match std::fs::File::open(path.join(".lodestone_config")) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Error while restoring instance {}, failed to read .lodestone_config file : {e}", path.display());
+                continue;
+            }
+        };
+        let dot_lodestone_config: DotLodestoneConfig = match serde_json::from_reader(
+            dot_lodestone_config_file,
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Error while restoring instance {}, failed to parse .lodestone_config file : {e}", path.display());
+                continue;
+            }
+        };
+        debug!("restoring instance: {}", path.display());
 
-            // read config as DotLodestoneConfig
-            let dot_lodestone_config: DotLodestoneConfig = serde_json::from_reader(
-                std::fs::File::open(path.join(".lodestone_config")).unwrap(),
-            )
-            .unwrap();
-            debug!("restoring instance: {}", path.display());
-
-            match dot_lodestone_config.game_type() {
-                GameType::MinecraftJava => {
-                    let instance = minecraft::MinecraftInstance::restore(
-                        path.to_owned(),
-                        dot_lodestone_config.clone(),
-                        event_broadcaster.clone(),
-                        macro_executor.clone(),
-                    )
-                    .await
-                    .unwrap();
-                    debug!("Restored Minecraft Instance successfully");
-                    ret.insert(dot_lodestone_config.uuid().to_owned(), instance.into());
-                }
-                GameType::MinecraftBedrock => {
-                    let instance = minecraft_bedrock::MinecraftBedrockInstance::restore(
-                        path.to_owned(),
-                        dot_lodestone_config.clone(),
-                        event_broadcaster.clone(),
-                        macro_executor.clone(),
-                    )
-                    .await
-                    .unwrap();
-                    debug!("Restored Minecraft Bedrock Instance successfully");
-                    ret.insert(dot_lodestone_config.uuid().to_owned(), instance.into());
-                }
-                GameType::Generic => {
-                    let instance = generic::GenericInstance::restore(
-                        path.to_owned(),
-                        dot_lodestone_config.clone(),
-                        event_broadcaster.clone(),
-                        macro_executor.clone(),
-                    )
-                    .await
-                    .unwrap();
-                    debug!("Restored Generic Instance successfully");
-                    ret.insert(dot_lodestone_config.uuid().to_owned(), instance.into());
-                }
+        match dot_lodestone_config.game_type() { GameType::MinecraftJava => {
+                let instance = minecraft::MinecraftInstance::restore(
+                    path.to_owned(),
+                    dot_lodestone_config.clone(),
+                    event_broadcaster.clone(),
+                    macro_executor.clone(),
+                )
+                .await
+                .unwrap();
+                debug!("Restored Minecraft Instance successfully");
+                ret.insert(dot_lodestone_config.uuid().to_owned(), instance.into());
+            }
+            GameType::MinecraftBedrock => {
+                let instance = minecraft_bedrock::MinecraftBedrockInstance::restore(
+                    path.to_owned(),
+                    dot_lodestone_config.clone(),
+                    event_broadcaster.clone(),
+                    macro_executor.clone(),
+                )
+                .await
+                .unwrap();
+                debug!("Restored Minecraft Bedrock Instance successfully");
+                ret.insert(dot_lodestone_config.uuid().to_owned(), instance.into());
+            }
+            GameType::Generic => {
+                let instance = generic::GenericInstance::restore(
+                    path.to_owned(),
+                    dot_lodestone_config.clone(),
+                    event_broadcaster.clone(),
+                    macro_executor.clone(),
+                )
+                .await
+                .unwrap();
+                debug!("Restored Generic Instance successfully");
+                ret.insert(dot_lodestone_config.uuid().to_owned(), instance.into());
             }
         }
     }
-    ret
+    Ok(ret)
 }
 
 fn setup_tracing() -> tracing_appender::non_blocking::WorkerGuard {
-    let timer = LocalTime::new(format_description!(
-        "[year]-[month]-[day]T[hour]:[minute]:[second]"
-    ));
-
     let file_appender = tracing_appender::rolling::hourly(
         LODESTONE_PATH.with(|v| v.join("log")),
         "lodestone_core.log",
@@ -185,8 +192,6 @@ fn setup_tracing() -> tracing_appender::non_blocking::WorkerGuard {
         let fmt_layer_stdout = tracing_subscriber::fmt::layer()
             // Use a more compact, abbreviated log format
             .compact()
-            // display minimal time stamps
-            .with_timer(timer.clone())
             // Display source code file paths
             .with_file(true)
             // Display source code line numbers
@@ -194,14 +199,11 @@ fn setup_tracing() -> tracing_appender::non_blocking::WorkerGuard {
             // Display the thread ID an event was recorded on
             .with_thread_ids(false)
             // Don't display the event's target (module path)
-            .with_target(false)
+            .with_target(true)
             .with_writer(std::io::stdout);
-
         let fmt_layer_file = tracing_subscriber::fmt::layer()
             // Use a more compact, abbreviated log format
             .compact()
-            // display minimal time stamps
-            .with_timer(timer)
             // Display source code file paths
             .with_file(true)
             // Display source code line numbers
@@ -209,16 +211,14 @@ fn setup_tracing() -> tracing_appender::non_blocking::WorkerGuard {
             // Display the thread ID an event was recorded on
             .with_thread_ids(false)
             // Don't display the event's target (module path)
-            .with_target(false)
+            .with_target(true)
             .with_ansi(false)
             .with_writer(non_blocking);
-        let filter_layer = EnvFilter::from("lodestone_core=debug");
 
         tracing_subscriber::registry()
-            // .with(ErrorLayer::default())
             .with(fmt_layer_stdout)
             .with(fmt_layer_file)
-            .with(filter_layer)
+            .with(EnvFilter::from("lodestone_core=debug"))
             .init();
     }
 
@@ -227,8 +227,6 @@ fn setup_tracing() -> tracing_appender::non_blocking::WorkerGuard {
         let fmt_layer_stdout = tracing_subscriber::fmt::layer()
             // Use a more compact, abbreviated log format
             .compact()
-            // display minimal time stamps
-            .with_timer(timer.clone())
             // Display source code file paths
             .with_file(false)
             // Display source code line numbers
@@ -237,73 +235,53 @@ fn setup_tracing() -> tracing_appender::non_blocking::WorkerGuard {
             .with_thread_ids(false)
             // Don't display the event's target (module path)
             .with_target(false)
-            .with_writer(std::io::stdout);
+            .with_writer(std::io::stdout)
+            .with_filter(EnvFilter::from("lodestone_core=info"));
 
         let fmt_layer_file = tracing_subscriber::fmt::layer()
             // Use a more compact, abbreviated log format
             .compact()
-            // display minimal time stamps
-            .with_timer(timer)
             // Display source code file paths
-            .with_file(false)
+            .with_file(true)
             // Display source code line numbers
-            .with_line_number(false)
+            .with_line_number(true)
             // Display the thread ID an event was recorded on
             .with_thread_ids(false)
             // Don't display the event's target (module path)
-            .with_target(false)
+            .with_target(true)
             .with_ansi(false)
-            .with_writer(non_blocking);
-        let filter_layer = EnvFilter::from("lodestone_core=info");
+            .with_writer(non_blocking)
+            .with_filter(EnvFilter::from("lodestone_core=debug"));
 
         tracing_subscriber::registry()
             // .with(ErrorLayer::default())
             .with(fmt_layer_stdout)
             .with(fmt_layer_file)
-            .with(filter_layer)
             .init();
     }
 
     _guard
 }
 
-async fn download_dependencies() -> Result<(), Error> {
-    let arch = if std::env::consts::ARCH == "x86_64" {
-        "x64"
-    } else {
-        std::env::consts::ARCH
-    };
-
-    let os = std::env::consts::OS;
-    let _7zip_name = format!("7z_{}_{}", os, arch);
-    let path_to_7z = PATH_TO_BINARIES.with(|v| v.join("7zip"));
-    // check if 7z is already downloaded
-    if !path_to_7z.join(&_7zip_name).exists() {
-        info!("Downloading 7z");
-        let _7z = download_file(
-            format!(
-                "https://github.com/Lodestone-Team/dependencies/raw/main/7z_{}_{}",
-                os, arch
-            )
-            .as_str(),
-            path_to_7z.as_ref(),
-            Some(_7zip_name.as_str()),
-            &|_| {},
-            false,
-        )
-        .await?;
-    } else {
-        info!("7z already downloaded");
-    }
-    if os != "windows" {
-        Command::new("chmod")
-            .arg("+x")
-            .arg(path_to_7z.join(&_7zip_name))
-            .output()
-            .await
-            .unwrap();
-    }
-    Ok(())
+fn output_sys_info() {
+    info!("lodestone_core version {}", VERSION.with(|v| v.clone()));
+    // output system info
+    info!("System info:");
+    info!("  OS: {}", std::env::consts::OS);
+    info!("  Arch: {}", std::env::consts::ARCH);
+    // CPU and RAM info
+    let sys = sysinfo::System::new_all();
+    let cpu_name = sys
+        .cpus()
+        .first()
+        .map_or_else(|| "Unknown CPU", |v| v.brand());
+    let ram = sys.total_memory();
+    info!("  CPU: {cpu_name}");
+    info!(
+        "  RAM: {ram} bytes ({ram_gb} GB)",
+        ram = ram,
+        ram_gb = ram / 1024 / 1024 / 1024
+    );
 }
 
 pub async fn run() -> (
@@ -311,27 +289,32 @@ pub async fn run() -> (
     AppState,
     tracing_appender::non_blocking::WorkerGuard,
 ) {
-    color_eyre::install().unwrap();
+    let _ = color_eyre::install().map_err(|e| {
+        error!("Failed to install color_eyre: {}", e);
+    });
     let guard = setup_tracing();
+    output_sys_info();
     let lodestone_path = LODESTONE_PATH.with(|path| path.clone());
-    create_dir_all(&lodestone_path).await.unwrap();
-    std::env::set_current_dir(&lodestone_path).expect("Failed to set current dir");
+    let _ = migrate(&lodestone_path).map_err(|e| {
+        error!("Error while migrating lodestone: {}. Lodestone will still start, but one or more instance may be in an erroneous state", e);
+    });
+    let path_to_instances = lodestone_path.join("instances");
 
-    create_dir_all(PATH_TO_BINARIES.with(|path| path.clone()))
-        .await
+    std::fs::create_dir_all(&lodestone_path)
+        .and_then(|_| std::env::set_current_dir(&lodestone_path))
+        .and_then(|_| std::fs::create_dir_all(PATH_TO_BINARIES.with(|path| path.clone())))
+        .and_then(|_| std::fs::create_dir_all(PATH_TO_STORES.with(|path| path.clone())))
+        .and_then(|_| std::fs::create_dir_all(&path_to_instances))
+        .and_then(|_| std::fs::create_dir_all(lodestone_path.join("tmp")))
+        .map_err(|e| {
+            error!(
+                "Failed to create lodestone path: {}. Lodestone will now crash...",
+                e
+            );
+        })
         .unwrap();
 
-    create_dir_all(PATH_TO_STORES.with(|path| path.clone()))
-        .await
-        .unwrap();
-
-    let web_path = lodestone_path.join("web");
-    let path_to_intances = lodestone_path.join("instances");
-    create_dir_all(&web_path).await.unwrap();
-    create_dir_all(&path_to_intances).await.unwrap();
     info!("Lodestone path: {}", lodestone_path.display());
-
-    download_dependencies().await.unwrap();
 
     let (tx, _rx) = EventBroadcaster::new(512);
 
@@ -358,6 +341,7 @@ pub async fn run() -> (
             "First time setup key: {}",
             ansi_term::Color::Green.paint(key.clone())
         );
+        info!("This is a one-time, in-memory randomly generated key that allows you to create the owner account.");
         info!(
             "{}",
             ansi_term::Color::Red.paint("DO NOT SHARE THIS KEY WITH ANYONE!")
@@ -367,8 +351,15 @@ pub async fn run() -> (
         None
     };
     let macro_executor = MacroExecutor::new(tx.clone());
-    let mut instances =
-        restore_instances(&lodestone_path, tx.clone(), macro_executor.clone()).await;
+    let mut instances = restore_instances(&path_to_instances, tx.clone(), macro_executor.clone())
+        .await
+        .map_err(|e| {
+            error!(
+                "Failed to restore instances: {}, lodestone will now crash...",
+                e
+            );
+        })
+        .unwrap();
     for (_, instance) in instances.iter_mut() {
         if instance.auto_start().await {
             info!("Auto starting instance {}", instance.name().await);
@@ -526,30 +517,53 @@ pub async fn run() -> (
                     port += 1;
                 }
                 let addr = SocketAddr::from(([0, 0, 0, 0], port));
+                let axum_server_handle = axum_server::Handle::new();
+                tokio::spawn({
+                    let axum_server_handle = axum_server_handle.clone();
+                    async move {
+                        info!("Lodestone Core live on {addr}");
+                        info!("Note that Lodestone Core does not host the web dashboard itself. Please visit https://www.lodestone.cc for setup instructions.");
+                        match tls_config_result {
+                            Ok(config) => {
+                                info!("TLS enabled");
+                                axum_server::bind_rustls(addr, config)
+                                    .handle(axum_server_handle)
+                                    .serve(app.into_make_service())
+                                    .await
+                            }
+                            Err(e) => {
+                                warn!("Invalid TLS config : {e}, using HTTP");
+                                axum_server::bind(addr)
+                                    .handle(axum_server_handle)
+                                    .serve(app.into_make_service())
+                                    .await
+                            }
+                        }
+                        .unwrap();
+                    }
+                });
                 select! {
                     _ = write_to_db_task => info!("Write to db task exited"),
                     _ = event_buffer_task => info!("Event buffer task exited"),
                     _ = monitor_report_task => info!("Monitor report task exited"),
-                    _ = {
-                        info!("Web server live on {addr}");
-                        async {
-                            match tls_config_result {
-                                Ok(config) => {
-                                    info!("TLS enabled");
-                                    axum_server::bind_rustls(addr, config).serve(app.into_make_service()).await
-                                },
-                                Err(e) => {
-                                    warn!("Invalid TLS config : {e}, using HTTP");
-                                    axum_server::bind(addr).serve(app.into_make_service()).await},
-                            }.unwrap();
-                        }
-                    } => info!("Server exited"),
                     _ = tokio::signal::ctrl_c() => info!("Ctrl+C received"),
                 }
+                info!("Shutting down web server");
+                axum_server_handle.shutdown();
+                info!("Signalling all instances to stop");
                 // cleanup
                 let mut instances = shared_state.instances.lock().await;
                 for (_, instance) in instances.iter_mut() {
-                    let _ = instance.stop(CausedBy::System, false).await;
+                    if instance.state().await == State::Stopped {
+                        continue;
+                    }
+                    if let Err(e) = instance.stop(CausedBy::System, false).await {
+                        error!(
+                            "Failed to stop instance {} : {}. Instance may need manual cleanup",
+                            instance.uuid().await,
+                            e
+                        );
+                    }
                 }
             }
         },

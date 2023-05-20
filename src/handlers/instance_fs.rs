@@ -1,4 +1,4 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::path::PathBuf;
 
 use axum::{
     body::Bytes,
@@ -8,21 +8,25 @@ use axum::{
 };
 use axum_auth::AuthBearer;
 use color_eyre::eyre::{eyre, Context};
+use fs_extra::TransitProcess;
 use headers::HeaderMap;
 use reqwest::header::CONTENT_LENGTH;
+use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
+use tracing::{debug, error};
+use ts_rs::TS;
 use walkdir::WalkDir;
 
 use crate::{
     auth::user::UserAction,
     error::{Error, ErrorKind},
-    events::{
-        new_fs_event, CausedBy, Event, EventInner, FSOperation, FSTarget, ProgressionEvent,
-        ProgressionEventInner,
-    },
+    events::{new_fs_event, CausedBy, Event, FSOperation, FSTarget, ProgressionEndValue},
     traits::t_configurable::TConfigurable,
-    types::{InstanceUuid, Snowflake},
-    util::{list_dir, rand_alphanumeric, scoped_join_win_safe, unzip_file, UnzipOption, resolve_path_conflict},
+    types::InstanceUuid,
+    util::{
+        format_byte, format_byte_download, list_dir, rand_alphanumeric, resolve_path_conflict,
+        scoped_join_win_safe, unzip_file_async, zip_files_async, UnzipOption,
+    },
     AppState,
 };
 
@@ -116,7 +120,9 @@ async fn read_instance_file(
     drop(instances);
     let path = scoped_join_win_safe(root, relative_path)?;
 
-    let ret = crate::util::fs::read_to_string(&path).await?;
+    let ret = tokio::fs::read_to_string(&path)
+        .await
+        .context("Failed to read file")?;
     let caused_by = CausedBy::User {
         user_id: requester.uid,
         user_name: requester.username,
@@ -153,8 +159,12 @@ async fn write_instance_file(
             source: eyre!("You don't have permission to write to this file"),
         });
     }
-    // create the file if it doesn't exist
-    crate::util::fs::write_all(&path, body).await?;
+    let mut file = tokio::fs::File::create(&path)
+        .await
+        .context("Failed to create file")?;
+    file.write_all(&body)
+        .await
+        .context("Failed to write to file")?;
 
     let caused_by = CausedBy::User {
         user_id: requester.uid,
@@ -199,6 +209,130 @@ async fn make_instance_directory(
     Ok(Json(()))
 }
 
+#[derive(Deserialize, TS)]
+#[ts(export)]
+struct CopyInstanceFileRequest {
+    relative_paths_source: Vec<PathBuf>,
+    relative_path_dest: PathBuf,
+}
+
+async fn copy_instance_files(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(uuid): Path<InstanceUuid>,
+    AuthBearer(token): AuthBearer,
+    Json(CopyInstanceFileRequest {
+        relative_paths_source,
+        relative_path_dest,
+    }): Json<CopyInstanceFileRequest>,
+) -> Result<Json<()>, Error> {
+    let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
+    requester.try_action(&UserAction::WriteInstanceFile(uuid.clone()))?;
+    let instances = state.instances.lock().await;
+    let instance = instances.get(&uuid).ok_or_else(|| Error {
+        kind: ErrorKind::NotFound,
+        source: eyre!("Instance not found"),
+    })?;
+    let root = instance.path().await;
+    drop(instances);
+    // join each path to the root
+    let paths_source = relative_paths_source
+        .iter()
+        .map(|p| scoped_join_win_safe(root.clone(), p))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let path_dest = scoped_join_win_safe(root, &relative_path_dest)?;
+
+    if !requester.can_perform_action(&UserAction::WriteGlobalFile) && is_path_protected(&path_dest)
+    {
+        return Err(Error {
+            kind: ErrorKind::PermissionDenied,
+            source: eyre!("You don't have permission to write to this file"),
+        });
+    }
+
+    let event_broadcaster = state.event_broadcaster.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let mut first = true;
+
+        let mut threshold = 500000_u64;
+
+        let mut elapsed_bytes = 0_u64;
+        let mut last_progression = 0_u64;
+        let mut progression_event_id = None;
+
+        let handle = |process_info: TransitProcess| {
+            if first {
+                threshold = process_info.total_bytes / 100;
+                let (progression_event_start, _progression_event_id) =
+                    Event::new_progression_event_start(
+                        "Copying files(s)",
+                        Some(process_info.total_bytes as f64),
+                        None,
+                        CausedBy::User {
+                            user_id: requester.uid.clone(),
+                            user_name: requester.username.clone(),
+                        },
+                    );
+                event_broadcaster.send(progression_event_start);
+                progression_event_id = Some(_progression_event_id);
+                first = false;
+                elapsed_bytes = process_info.copied_bytes;
+            } else {
+                elapsed_bytes = process_info.copied_bytes;
+                let progression = elapsed_bytes / threshold;
+                if progression > last_progression {
+                    last_progression = progression;
+                    event_broadcaster.send(Event::new_progression_event_update(
+                        progression_event_id.as_ref().unwrap(),
+                        format!(
+                            "Copying file {}, {}",
+                            process_info.file_name,
+                            format_byte_download(
+                                process_info.copied_bytes,
+                                process_info.total_bytes
+                            )
+                        ),
+                        threshold as f64,
+                    ));
+                }
+            }
+            fs_extra::dir::TransitProcessResult::SkipAll
+        };
+        debug!("Copying {:?} to {:?}", paths_source, path_dest);
+        if let Err(e) = fs_extra::copy_items_with_progress(
+            &paths_source,
+            &path_dest,
+            &fs_extra::dir::CopyOptions::new(),
+            handle,
+        ) {
+            error!("Error copying file(s): {}", e);
+            event_broadcaster.send(Event::new_progression_event_end(
+                progression_event_id.unwrap(),
+                false,
+                Some(&format!("Error copying file(s): {}", e)),
+                Some(ProgressionEndValue::FSOperationCompleted {
+                    instance_uuid: uuid,
+                    success: false,
+                    message: format!("Error copying file(s): {}", e),
+                }),
+            ));
+        } else {
+            event_broadcaster.send(Event::new_progression_event_end(
+                progression_event_id.unwrap(),
+                true,
+                None::<&str>,
+                Some(ProgressionEndValue::FSOperationCompleted {
+                    instance_uuid: uuid,
+                    success: true,
+                    message: "File(s) copied successfully".to_string(),
+                }),
+            ));
+        }
+    });
+    Ok(Json(()))
+}
+
 async fn move_instance_file(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path((uuid, base64_relative_path_source, base64_relative_path_dest)): Path<(
@@ -222,6 +356,13 @@ async fn move_instance_file(
     let path_source = scoped_join_win_safe(&root, relative_path_source)?;
     let path_dest = scoped_join_win_safe(&root, relative_path_dest)?;
 
+    let relative_path_source = path_source
+        .strip_prefix(&root)
+        .context("Error stripping prefix")?;
+    let relative_path_dest = path_dest
+        .strip_prefix(&root)
+        .context("Error stripping prefix")?;
+
     if !requester.can_perform_action(&UserAction::WriteInstanceFile(uuid.clone()))
         && (is_path_protected(&path_source) || is_path_protected(&path_dest))
     {
@@ -230,7 +371,16 @@ async fn move_instance_file(
             source: eyre!("File extension is protected"),
         });
     }
-    crate::util::fs::rename(&path_source, &path_dest).await?;
+
+    let path_dest = resolve_path_conflict(path_dest.to_owned(), None);
+
+    tokio::fs::rename(&path_source, &path_dest)
+        .await
+        .context(format!(
+            "Error moving file from {} to {}",
+            relative_path_source.display(),
+            relative_path_dest.display()
+        ))?;
 
     let caused_by = CausedBy::User {
         user_id: requester.uid,
@@ -383,7 +533,7 @@ async fn new_instance_file(
     Ok(Json(()))
 }
 
-async fn download_instance_file(
+async fn get_instance_file_url(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path((uuid, base64_relative_path)): Path<(InstanceUuid, String)>,
     AuthBearer(token): AuthBearer,
@@ -431,6 +581,10 @@ async fn upload_instance_file(
     let relative_path = decode_base64(&base64_relative_path)?;
     let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
     requester.try_action(&UserAction::WriteInstanceFile(uuid.clone()))?;
+    let caused_by = CausedBy::User {
+        user_id: requester.uid.clone(),
+        user_name: requester.username.clone(),
+    };
     let instances = state.instances.lock().await;
     let instance = instances.get(&uuid).ok_or_else(|| Error {
         kind: ErrorKind::NotFound,
@@ -441,35 +595,20 @@ async fn upload_instance_file(
     let path_to_dir = scoped_join_win_safe(&root, relative_path)?;
     crate::util::fs::create_dir_all(&path_to_dir).await?;
 
-    let event_id = Snowflake::default();
     let total = headers
         .get(CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<f64>().ok());
-    state.event_broadcaster.send(Event {
-        event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-            event_id,
-            progression_event_inner: ProgressionEventInner::ProgressionStart {
-                progression_name: "Uploading files".to_string(),
-                producer_id: None,
-                total,
-                inner: None,
-            },
-        }),
-        details: "".to_string(),
-        snowflake: Snowflake::default(),
-        caused_by: CausedBy::User {
-            user_id: requester.uid.clone(),
-            user_name: requester.username.clone(),
-        },
-    });
+    let (progression_start_event, event_id) =
+        Event::new_progression_event_start("Uploading files", total, None, caused_by.clone());
+    state.event_broadcaster.send(progression_start_event);
     while let Ok(Some(mut field)) = multipart.next_field().await {
         let name = field.file_name().ok_or_else(|| Error {
             kind: ErrorKind::BadRequest,
             source: eyre!("Missing file name"),
         })?;
         let name = sanitize_filename::sanitize(name);
-        let path = scoped_join_win_safe(&path_to_dir, &name)?;
+        let path = resolve_path_conflict(scoped_join_win_safe(&path_to_dir, &name)?, None);
         // if the file has a protected extension, or no extension, deny
         if !requester.can_perform_action(&UserAction::WriteGlobalFile) && is_path_protected(&path) {
             return Err(Error {
@@ -478,95 +617,95 @@ async fn upload_instance_file(
             });
         }
         let path = resolve_path_conflict(path, None);
+
         let mut file = crate::util::fs::create(&path).await?;
 
-        while let Some(chunk) = field.chunk().await.map_err(|e| {
-            std::fs::remove_file(&path).ok();
-            state.event_broadcaster.send(Event {
-                event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                    event_id,
-                    progression_event_inner: ProgressionEventInner::ProgressionEnd {
-                        success: false,
-                        message: Some(e.to_string()),
-                        inner: None,
-                    },
-                }),
-                details: "".to_string(),
-                snowflake: Snowflake::default(),
-                caused_by: CausedBy::User {
-                    user_id: requester.uid.clone(),
-                    user_name: requester.username.clone(),
-                },
-            });
-            Err::<(), axum::extract::multipart::MultipartError>(e)
-                .context("Failed to read chunk")
-                .unwrap_err()
-        })? {
-            state.event_broadcaster.send(Event {
-                event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                    event_id,
-                    progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                        progress_message: format!("Uploading {}", name),
-                        progress: chunk.len() as f64,
-                    },
-                }),
-                details: "".to_string(),
-                snowflake: Snowflake::default(),
-                caused_by: CausedBy::User {
-                    user_id: requester.uid.clone(),
-                    user_name: requester.username.clone(),
-                },
-            });
-            file.write_all(&chunk).await.map_err(|e| {
-                std::fs::remove_file(&path).ok();
-                state.event_broadcaster.send(Event {
-                    event_inner: EventInner::ProgressionEvent(ProgressionEvent {
+        let threshold = total.unwrap_or(500000.0) / 100.0;
+
+        let mut elapsed_bytes = 0_u64;
+        let mut last_progression = 0_u64;
+
+        while let Some(chunk) = match field.chunk().await {
+            Ok(v) => v,
+            Err(e) => {
+                tokio::fs::remove_file(&path).await.ok();
+                state
+                    .event_broadcaster
+                    .send(Event::new_progression_event_end(
                         event_id,
-                        progression_event_inner: ProgressionEventInner::ProgressionEnd {
+                        false,
+                        Some(&e.to_string()),
+                        Some(ProgressionEndValue::FSOperationCompleted {
+                            instance_uuid: uuid.clone(),
                             success: false,
-                            message: Some(e.to_string()),
-                            inner: None,
+                            message: format!("Failed to upload file {name}, {e}"),
+                        }),
+                    ));
+                return Err::<Json<()>, axum::extract::multipart::MultipartError>(e)
+                    .context("Failed to read chunk")
+                    .map_err(Error::from);
+            }
+        } {
+            elapsed_bytes += chunk.len() as u64;
+            let progression = (elapsed_bytes as f64 / threshold).floor() as u64;
+            if progression > last_progression {
+                last_progression = progression;
+                state
+                    .event_broadcaster
+                    .send(Event::new_progression_event_update(
+                        &event_id,
+                        if let Some(total) = total {
+                            format!(
+                                "Uploading {name}, {}",
+                                format_byte_download(elapsed_bytes, total as u64)
+                            )
+                        } else {
+                            format!("Uploading {name}, {} uploaded", format_byte(elapsed_bytes))
                         },
-                    }),
-                    details: "".to_string(),
-                    snowflake: Snowflake::default(),
-                    caused_by: CausedBy::User {
-                        user_id: requester.uid.clone(),
-                        user_name: requester.username.clone(),
-                    },
-                });
-                Err::<(), std::io::Error>(e)
-                    .context("Failed to write chunk")
-                    .unwrap_err()
-            })?;
+                        threshold,
+                    ));
+            }
+            match file.write_all(&chunk).await {
+                Ok(v) => v,
+                Err(e) => {
+                    tokio::fs::remove_file(&path).await.ok();
+                    state
+                        .event_broadcaster
+                        .send(Event::new_progression_event_end(
+                            event_id,
+                            false,
+                            Some(&e.to_string()),
+                            Some(ProgressionEndValue::FSOperationCompleted {
+                                instance_uuid: uuid.clone(),
+                                success: false,
+                                message: format!("Failed to upload file {name}, {e}"),
+                            }),
+                        ));
+                    return Err::<Json<()>, std::io::Error>(e)
+                        .context("Failed to write chunk")
+                        .map_err(Error::from);
+                }
+            };
         }
 
-        let caused_by = CausedBy::User {
-            user_id: requester.uid.clone(),
-            user_name: requester.username.clone(),
-        };
         state.event_broadcaster.send(new_fs_event(
             FSOperation::Upload,
             FSTarget::File(path),
-            caused_by,
+            caused_by.clone(),
         ));
     }
-    state.event_broadcaster.send(Event {
-        event_inner: EventInner::ProgressionEvent(ProgressionEvent {
+    state
+        .event_broadcaster
+        .send(Event::new_progression_event_end(
             event_id,
-            progression_event_inner: ProgressionEventInner::ProgressionEnd {
+            true,
+            Some("Upload complete"),
+            Some(ProgressionEndValue::FSOperationCompleted {
+                instance_uuid: uuid,
                 success: true,
-                message: Some("Upload complete".to_string()),
-                inner: None,
-            },
-        }),
-        details: "".to_string(),
-        snowflake: Snowflake::default(),
-        caused_by: CausedBy::User {
-            user_id: requester.uid.clone(),
-            user_name: requester.username.clone(),
-        },
-    });
+                message: "File(s) uploaded".to_string(),
+            }),
+        ));
     Ok(Json(()))
 }
 
@@ -575,7 +714,7 @@ pub async fn unzip_instance_file(
     Path((uuid, base64_relative_path)): Path<(InstanceUuid, String)>,
     AuthBearer(token): AuthBearer,
     Json(unzip_option): Json<UnzipOption>,
-) -> Result<Json<HashSet<PathBuf>>, Error> {
+) -> Result<Json<()>, Error> {
     let relative_path = decode_base64(&base64_relative_path)?;
     let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
     requester.try_action(&UserAction::WriteInstanceFile(uuid.clone()))?;
@@ -586,7 +725,7 @@ pub async fn unzip_instance_file(
     })?;
     let root = instance.path().await;
     drop(instances);
-    let path_to_zip_file = scoped_join_win_safe(&root, relative_path)?;
+    let path_to_zip_file = scoped_join_win_safe(root, &relative_path)?;
 
     if let UnzipOption::ToDir(ref dir) = unzip_option {
         if !requester.can_perform_action(&UserAction::WriteGlobalFile) && is_path_protected(dir) {
@@ -596,8 +735,144 @@ pub async fn unzip_instance_file(
             });
         }
     }
+    let event_broadcaster = state.event_broadcaster.clone();
+    tokio::spawn(async move {
+        let (progression_event_start, event_id) = Event::new_progression_event_start(
+            format!("Unzipping {relative_path}"),
+            None,
+            None,
+            CausedBy::User {
+                user_id: requester.uid.clone(),
+                user_name: requester.username.clone(),
+            },
+        );
 
-    Ok(Json(unzip_file(path_to_zip_file, unzip_option).await?))
+        event_broadcaster.send(progression_event_start);
+
+        if let Err(e) = unzip_file_async(path_to_zip_file, unzip_option).await {
+            event_broadcaster.send(Event::new_progression_event_end(
+                event_id,
+                false,
+                Some(&format!("Unzip failed: {}", e)),
+                Some(ProgressionEndValue::FSOperationCompleted {
+                    instance_uuid: uuid,
+                    success: false,
+                    message: format!("Unzip {} failed : {e}", relative_path),
+                }),
+            ));
+        } else {
+            event_broadcaster.send(Event::new_progression_event_end(
+                event_id,
+                true,
+                Some("Unzip complete"),
+                Some(ProgressionEndValue::FSOperationCompleted {
+                    instance_uuid: uuid,
+                    success: true,
+                    message: format!("Unzipped {relative_path}"),
+                }),
+            ));
+        }
+    });
+
+    Ok(Json(()))
+}
+
+#[derive(Deserialize, TS)]
+#[ts(export)]
+struct ZipRequest {
+    target_relative_paths: Vec<PathBuf>,
+    destination_relative_path: PathBuf,
+}
+
+async fn zip_instance_files(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(uuid): Path<InstanceUuid>,
+    AuthBearer(token): AuthBearer,
+    Json(zip_request): Json<ZipRequest>,
+) -> Result<Json<()>, Error> {
+    let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
+    requester.try_action(&UserAction::WriteInstanceFile(uuid.clone()))?;
+    let instances = state.instances.lock().await;
+    let instance = instances.get(&uuid).ok_or_else(|| Error {
+        kind: ErrorKind::NotFound,
+        source: eyre!("Instance not found"),
+    })?;
+    let root = instance.path().await;
+    drop(instances);
+    let ZipRequest {
+        mut target_relative_paths,
+        mut destination_relative_path,
+    } = zip_request;
+
+    // apply scoped_join_win_safe to all paths
+    for path in &mut target_relative_paths {
+        *path = scoped_join_win_safe(&root, &*path)?;
+    }
+    destination_relative_path = scoped_join_win_safe(&root, &destination_relative_path)?;
+
+    if !requester.can_perform_action(&UserAction::ReadGlobalFile)
+        && is_path_protected(&destination_relative_path)
+    {
+        return Err(Error {
+            kind: ErrorKind::PermissionDenied,
+            source: eyre!("Destination is protected"),
+        });
+    }
+
+    let event_broadcaster = state.event_broadcaster.clone();
+
+    tokio::spawn(async move {
+        let aggregate_name = {
+            let combined_file_name = target_relative_paths
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(", ");
+            if combined_file_name.len() < 100 {
+                combined_file_name
+            } else {
+                format!("{} files", target_relative_paths.len())
+            }
+        };
+        let (progression_start_event, event_id) = Event::new_progression_event_start(
+            format!("Zipping {aggregate_name}"),
+            None,
+            None,
+            CausedBy::User {
+                user_id: requester.uid.clone(),
+                user_name: requester.username.clone(),
+            },
+        );
+        event_broadcaster.send(progression_start_event);
+
+        if let Err(e) = zip_files_async(&target_relative_paths, destination_relative_path).await {
+            event_broadcaster.send(Event::new_progression_event_end(
+                event_id,
+                false,
+                Some(&format!("Zipping failed: {e}")),
+                Some(ProgressionEndValue::FSOperationCompleted {
+                    instance_uuid: uuid,
+                    success: false,
+                    message: format!("Zipping {aggregate_name} failed : {e}"),
+                }),
+            ));
+        } else {
+            event_broadcaster.send(Event::new_progression_event_end(
+                event_id,
+                true,
+                Some("Zip complete"),
+                Some(ProgressionEndValue::FSOperationCompleted {
+                    instance_uuid: uuid,
+                    success: true,
+                    message: format!("Zipped {aggregate_name}"),
+                }),
+            ));
+        }
+    });
+
+    // remove root from path
+
+    Ok(Json(()))
 }
 
 pub fn get_instance_fs_routes(state: AppState) -> Router {
@@ -618,6 +893,7 @@ pub fn get_instance_fs_routes(state: AppState) -> Router {
             "/instance/:uuid/fs/:base64_relative_path/mkdir",
             put(make_instance_directory),
         )
+        .route("/instance/:uuid/fs/cpr", put(copy_instance_files))
         .route(
             "/instance/:uuid/fs/:base64_relative_path/move/:base64_relative_path_dest",
             put(move_instance_file),
@@ -635,8 +911,8 @@ pub fn get_instance_fs_routes(state: AppState) -> Router {
             put(new_instance_file),
         )
         .route(
-            "/instance/:uuid/fs/:base64_relative_path/download",
-            get(download_instance_file),
+            "/instance/:uuid/fs/:base64_relative_path/url",
+            get(get_instance_file_url),
         )
         .route(
             "/instance/:uuid/fs/:base64_relative_path/upload",
@@ -647,5 +923,6 @@ pub fn get_instance_fs_routes(state: AppState) -> Router {
             "/instance/:uuid/fs/:base64_relative_path/unzip",
             put(unzip_instance_file),
         )
+        .route("/instance/:uuid/fs/zip", put(zip_instance_files))
         .with_state(state)
 }

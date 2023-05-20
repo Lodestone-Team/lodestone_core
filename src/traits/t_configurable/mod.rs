@@ -40,7 +40,7 @@ pub enum Game {
     MinecraftJava {
         variant: MinecraftVariant,
     },
-    MinecraftBedrock {},
+    MinecraftBedrock,
     Generic {
         game_name: GameType,       //used for identifying the "game" ("Minecraft")
         game_display_name: String, //displaying to the user what on earth this is ("MinecraftGlowstone")

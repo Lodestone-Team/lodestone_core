@@ -18,7 +18,10 @@ use crate::traits::t_server::{MonitorReport, State, StateAction, TServer};
 
 use crate::types::Snowflake;
 use crate::util::dont_spawn_terminal;
-
+use crate::implementations::minecraft_bedrock::line_parser::{
+    parse_player_joined, parse_player_left, parse_server_started,
+    parse_system_msg,
+};
 use super::MinecraftBedrockInstance;
 use super::player::MinecraftBedrockPlayer;
 use tracing::{debug, error, info, warn};
@@ -50,16 +53,13 @@ impl TServer for MinecraftBedrockInstance {
             });
         }
 
-        env::set_current_dir(&self.path_to_instance).context(
-            "Failed to set current directory to the instance's path, is the path valid?",
-        )?;
-
-        
-        let mut server_start_command = Command::new(self
-            .path_to_instance
+        let mut server_start_command = Command::new(
+            self.path_to_instance.clone()
             .join("bedrock_server"));
 
-        match dont_spawn_terminal(&mut server_start_command)
+        let server_start_command = server_start_command.current_dir(self.path_to_instance.clone());
+
+        match dont_spawn_terminal(server_start_command)
             .stdout(Stdio::piped())
             .stdin(Stdio::piped())
             .stderr(Stdio::piped())
@@ -100,58 +100,6 @@ impl TServer for MinecraftBedrockInstance {
                     // let macro_executor = self.macro_executor.clone();
                     let mut __self = self.clone();
                     async move {
-                        fn parse_system_msg(msg: &str) -> Option<String> {
-                            lazy_static! {
-                                static ref RE: Regex = Regex::new(r"\[(.*)\]\s(.*)").unwrap();
-                            }
-                            if RE.is_match(msg).ok()? {
-                                RE.captures(msg)
-                                    .ok()?
-                                    .map(|caps| caps.get(2).unwrap().as_str().to_string())
-                            } else {
-                                None
-                            }
-                        }
-                        fn parse_player_joined(system_msg: &str) -> Option<(String, String)> {
-                            lazy_static! {
-                                static ref RE: Regex = Regex::new(r"Player connected:\s*(\w+),\s*xuid:\s*(\d+)").unwrap();
-                            }
-                            if RE.is_match(system_msg).unwrap() {
-                                if let Some(cap) = RE.captures(system_msg).ok()? {
-                                    Some((
-                                        cap.get(1)?.as_str().to_string(),
-                                        cap.get(2)?.as_str().to_string(),
-                                    ))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        }
-
-                        fn parse_player_left(system_msg: &str) -> Option<String> {
-                            lazy_static! {
-                                static ref RE: Regex = Regex::new(r"Player disconnected:\s*(\w+)").unwrap();
-                            }
-                            if RE.is_match(system_msg).unwrap() {
-                                if let Some(cap) = RE.captures(system_msg).ok()? {
-                                    Some(cap.get(1)?.as_str().to_string())
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        }
-
-                        fn parse_server_started(system_msg: &str) -> bool {
-                            lazy_static! {
-                                static ref RE: Regex = Regex::new(r"Server started.").unwrap();
-                            }
-                            RE.is_match(system_msg).unwrap()
-                        }
-
                         let mut did_start = false;
 
                         let mut stdout_lines = BufReader::new(stdout).lines();

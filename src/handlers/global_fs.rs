@@ -21,11 +21,7 @@ use ts_rs::TS;
 use crate::{
     auth::user::UserAction,
     error::{Error, ErrorKind},
-    events::{
-        new_fs_event, CausedBy, Event, EventInner, FSOperation, FSTarget, ProgressionEvent,
-        ProgressionEventInner,
-    },
-    types::Snowflake,
+    events::{new_fs_event, CausedBy, Event, FSOperation, FSTarget},
     util::{list_dir, rand_alphanumeric},
     AppState,
 };
@@ -44,7 +40,10 @@ pub enum FileType {
 #[ts(export)]
 pub struct FileEntry {
     pub name: String,
+    pub file_stem: String,
+    pub extension: Option<String>,
     pub path: String,
+    pub size: Option<u64>,
     pub creation_time: Option<u64>,
     pub modification_time: Option<u64>,
     pub file_type: FileType,
@@ -60,8 +59,24 @@ impl From<&std::path::Path> for FileEntry {
             FileType::Unknown
         };
         Self {
-            name: path.file_name().unwrap().to_string_lossy().into_owned(),
-            path: path.file_name().unwrap().to_string_lossy().into_owned(),
+            name: path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path: path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            size: if path.is_file() {
+                path.metadata().ok().map(|m| m.len())
+            } else {
+                None
+            },
+            file_stem: path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            extension: path.extension().map(|s| s.to_string_lossy().into_owned()),
             // unix timestamp
             // if we cant get the time, return none
             creation_time: path
@@ -250,12 +265,7 @@ async fn move_file(
 
     requester.try_action(&UserAction::WriteGlobalFile)?;
 
-    tokio::fs::rename(&path_source, &path_dest)
-        .await
-        .context(format!(
-            "Failed to move file from {} to {}",
-            path_source, path_dest
-        ))?;
+    crate::util::fs::rename(&path_source, &path_dest).await?;
 
     let caused_by = CausedBy::User {
         user_id: requester.uid,
@@ -450,24 +460,16 @@ async fn upload_file(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<f64>().ok());
 
-    let event_id = Snowflake::default();
-    state.event_broadcaster.send(Event {
-        event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-            event_id,
-            progression_event_inner: ProgressionEventInner::ProgressionStart {
-                progression_name: "Uploading files".to_string(),
-                producer_id: None,
-                total,
-                inner: None,
-            },
-        }),
-        details: "".to_string(),
-        snowflake: Snowflake::default(),
-        caused_by: CausedBy::User {
+    let (progression_start_event, event_id) = Event::new_progression_event_start(
+        "Uploading file(s)",
+        total,
+        None,
+        CausedBy::User {
             user_id: requester.uid.clone(),
             user_name: requester.username.clone(),
         },
-    });
+    );
+    state.event_broadcaster.send(progression_start_event);
 
     while let Ok(Some(mut field)) = multipart.next_field().await {
         let name = field
@@ -502,44 +504,31 @@ async fn upload_file(
             .await
             .context(format!("Failed to create file {}", path.display()))?;
 
-        while let Some(chunk) = field.chunk().await.map_err(|e| {
-            std::fs::remove_file(&path).ok();
-            state.event_broadcaster.send(Event {
-                event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                    event_id,
-                    progression_event_inner: ProgressionEventInner::ProgressionEnd {
-                        success: false,
-                        message: Some(e.to_string()),
-                        inner: None,
-                    },
-                }),
-                details: "".to_string(),
-                snowflake: Snowflake::default(),
-                caused_by: CausedBy::User {
-                    user_id: requester.uid.clone(),
-                    user_name: requester.username.clone(),
-                },
-            });
-            Error {
-                kind: ErrorKind::BadRequest,
-                source: eyre!("Failed to read chunk: {}", e),
+        while let Some(chunk) = match field.chunk().await {
+            Ok(v) => v,
+            Err(e) => {
+                tokio::fs::remove_file(&path).await.ok();
+                state
+                    .event_broadcaster
+                    .send(Event::new_progression_event_end(
+                        event_id,
+                        false,
+                        Some(&e.to_string()),
+                        None,
+                    ));
+                return Err(Error {
+                    kind: ErrorKind::BadRequest,
+                    source: eyre!("Failed to read chunk: {}", e),
+                });
             }
-        })? {
-            state.event_broadcaster.send(Event {
-                event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                    event_id,
-                    progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                        progress_message: format!("Uploading {}", name),
-                        progress: chunk.len() as f64,
-                    },
-                }),
-                details: "".to_string(),
-                snowflake: Snowflake::default(),
-                caused_by: CausedBy::User {
-                    user_id: requester.uid.clone(),
-                    user_name: requester.username.clone(),
-                },
-            });
+        } {
+            state
+                .event_broadcaster
+                .send(Event::new_progression_event_update(
+                    &event_id,
+                    format!("Uploading {name}"),
+                    chunk.len() as f64,
+                ));
             file.write_all(&chunk).await.map_err(|_| {
                 std::fs::remove_file(&path).ok();
                 eyre!("Failed to write chunk")
@@ -556,22 +545,14 @@ async fn upload_file(
             caused_by,
         ));
     }
-    state.event_broadcaster.send(Event {
-        event_inner: EventInner::ProgressionEvent(ProgressionEvent {
+    state
+        .event_broadcaster
+        .send(Event::new_progression_event_end(
             event_id,
-            progression_event_inner: ProgressionEventInner::ProgressionEnd {
-                success: true,
-                message: Some("Upload complete".to_string()),
-                inner: None,
-            },
-        }),
-        details: "".to_string(),
-        snowflake: Snowflake::default(),
-        caused_by: CausedBy::User {
-            user_id: requester.uid.clone(),
-            user_name: requester.username.clone(),
-        },
-    });
+            true,
+            Some("Upload complete"),
+            None,
+        ));
 
     Ok(Json(()))
 }

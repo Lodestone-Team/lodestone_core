@@ -5,7 +5,7 @@ pub mod players_manager;
 pub mod resource;
 pub mod util;
 pub mod server;
-
+mod line_parser;
 use crate::event_broadcaster::EventBroadcaster;
 use crate::traits::t_configurable::GameType;
 
@@ -35,8 +35,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::{self};
 use ts_rs::TS;
 
+use crate::events::{Event, ProgressionEventID};
 use crate::error::{Error, ErrorKind};
-use crate::events::{CausedBy, Event, EventInner, ProgressionEvent, ProgressionEventInner};
+use crate::events::{CausedBy, EventInner, ProgressionEvent, ProgressionEventInner};
 use crate::macro_executor::{MacroExecutor, MacroPID};
 use crate::prelude::PATH_TO_BINARIES;
 use crate::traits::t_configurable::PathBuf;
@@ -347,7 +348,7 @@ impl MinecraftBedrockInstance {
         config: SetupConfig,
         dot_lodestone_config: DotLodestoneConfig,
         path_to_instance: PathBuf,
-        progression_event_id: Snowflake,
+        progression_event_id: &ProgressionEventID,
         event_broadcaster: EventBroadcaster,
         macro_executor: MacroExecutor,
     ) -> Result<MinecraftBedrockInstance, Error> {
@@ -369,37 +370,14 @@ impl MinecraftBedrockInstance {
                 let progression_event_id = progression_event_id;
                 &move |dl| {
                     if let Some(total) = dl.total {
-                        let _ = event_broadcaster.send(Event {
-                            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                                event_id: progression_event_id,
-                                progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                                    progress: (dl.step as f64 / total as f64) * 3.0,
-                                    progress_message: format!(
-                                        "1/3: Downloading {}",
-                                        format_byte_download(dl.downloaded, total),
-                                    ),
-                                },
-                            }),
-                            details: "".to_string(),
-                            snowflake: Snowflake::default(),
-                            caused_by: CausedBy::Unknown,
-                        });
-                    } else {
-                        let _ = event_broadcaster.send(Event {
-                            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                                event_id: progression_event_id,
-                                progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                                    progress: 0.0,
-                                    progress_message: format!(
-                                        "1/3: Downloading {}",
-                                        format_byte(dl.downloaded),
-                                    ),
-                                },
-                            }),
-                            details: "".to_string(),
-                            snowflake: Snowflake::default(),
-                            caused_by: CausedBy::Unknown,
-                        });
+                        event_broadcaster.send(Event::new_progression_event_update(
+                            progression_event_id,
+                            format!(
+                                "1/3: Downloading server zip file {}",
+                                format_byte_download(dl.downloaded, total)
+                            ),
+                            (dl.step as f64 / total as f64) * 4.0,
+                        ));
                     }
                 }
             },
@@ -411,7 +389,7 @@ impl MinecraftBedrockInstance {
         unzip_file(
             &server_zip, 
             UnzipOption::ToDir(path_to_instance.clone()),
-        ).await?;
+        );
 
         tokio::fs::remove_file(&server_zip).await.context(format!(
             "Could not remove zip {}",
@@ -425,18 +403,11 @@ impl MinecraftBedrockInstance {
         let uuid = dot_lodestone_config.uuid().to_owned();
 
         // Step 2: Create Directories
-        let _ = event_broadcaster.send(Event {
-            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                event_id: progression_event_id,
-                progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                    progress: 1.0,
-                    progress_message: "2/3: Creating directories".to_string(),
-                },
-            }),
-            details: "".to_string(),
-            snowflake: Snowflake::default(),
-            caused_by: CausedBy::Unknown,
-        });
+        event_broadcaster.send(Event::new_progression_event_update(
+            progression_event_id,
+            "2/3: Creating directories",
+            1.0,
+        ));
         
         tokio::fs::create_dir_all(&path_to_instance)
             .await
@@ -452,19 +423,12 @@ impl MinecraftBedrockInstance {
 
 
         
-        // Step 3: Finishing Up
-        let _ = event_broadcaster.send(Event {
-            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                event_id: progression_event_id,
-                progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                    progress: 1.0,
-                    progress_message: "3/3: Finishing up".to_string(),
-                },
-            }),
-            details: "".to_string(),
-            snowflake: Snowflake::default(),
-            caused_by: CausedBy::Unknown,
-        });
+        // Step 4: Finishing Up
+        event_broadcaster.send(Event::new_progression_event_update(
+            progression_event_id,
+            "3/3: Finishing up",
+            1.0,
+        ));
 
         let restore_config = RestoreConfig {
             name: config.name,

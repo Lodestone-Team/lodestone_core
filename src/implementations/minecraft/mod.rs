@@ -20,7 +20,6 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
 use sysinfo::SystemExt;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
@@ -30,15 +29,14 @@ use tokio::sync::Mutex;
 use ::serde::{Deserialize, Serialize};
 use serde_json::to_string_pretty;
 
-use tracing::{debug, error, info};
+use tracing::error;
 
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::{self};
+use tokio;
 use ts_rs::TS;
 
 use crate::error::Error;
 use crate::event_broadcaster::EventBroadcaster;
-use crate::events::{CausedBy, Event, EventInner, ProgressionEvent, ProgressionEventInner};
+use crate::events::{Event, ProgressionEventID};
 use crate::macro_executor::{MacroExecutor, MacroPID};
 use crate::prelude::PATH_TO_BINARIES;
 use crate::traits::t_configurable::PathBuf;
@@ -51,9 +49,10 @@ use crate::traits::t_configurable::manifest::{
 use crate::traits::t_macro::TaskEntry;
 use crate::traits::t_server::State;
 use crate::traits::TInstance;
-use crate::types::{DotLodestoneConfig, InstanceUuid, Snowflake};
+use crate::types::{DotLodestoneConfig, InstanceUuid};
 use crate::util::{
-    dont_spawn_terminal, download_file, format_byte, format_byte_download, unzip_file, UnzipOption,
+    dont_spawn_terminal, download_file, format_byte, format_byte_download, unzip_file_async,
+    UnzipOption,
 };
 
 use self::configurable::{CmdArgSetting, ServerPropertySetting};
@@ -197,18 +196,9 @@ pub struct MinecraftInstance {
     players_manager: Arc<Mutex<PlayersManager>>,
     configurable_manifest: Arc<Mutex<ConfigurableManifest>>,
     macro_executor: MacroExecutor,
-    backup_sender: UnboundedSender<BackupInstruction>,
     rcon_conn: Arc<Mutex<Option<rcon::Connection<tokio::net::TcpStream>>>>,
     macro_name_to_last_run: Arc<Mutex<HashMap<String, i64>>>,
     pid_to_task_entry: Arc<Mutex<IndexMap<MacroPID, TaskEntry>>>,
-}
-
-#[derive(Debug, Clone)]
-enum BackupInstruction {
-    SetPeriod(Option<u32>),
-    BackupNow,
-    Pause,
-    Resume,
 }
 
 #[tokio::test]
@@ -441,7 +431,7 @@ impl MinecraftInstance {
         config: SetupConfig,
         dot_lodestone_config: DotLodestoneConfig,
         path_to_instance: PathBuf,
-        progression_event_id: Snowflake,
+        progression_event_id: &ProgressionEventID,
         event_broadcaster: EventBroadcaster,
         macro_executor: MacroExecutor,
     ) -> Result<MinecraftInstance, Error> {
@@ -455,18 +445,11 @@ impl MinecraftInstance {
         let uuid = dot_lodestone_config.uuid().to_owned();
 
         // Step 1: Create Directories
-        event_broadcaster.send(Event {
-            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                event_id: progression_event_id,
-                progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                    progress: 1.0,
-                    progress_message: "1/4: Creating directories".to_string(),
-                },
-            }),
-            details: "".to_string(),
-            snowflake: Snowflake::default(),
-            caused_by: CausedBy::Unknown,
-        });
+        event_broadcaster.send(Event::new_progression_event_update(
+            progression_event_id,
+            "1/4: Creating directories",
+            1.0,
+        ));
         tokio::fs::create_dir_all(&path_to_instance)
             .await
             .and(tokio::fs::create_dir_all(&path_to_macros).await)
@@ -498,25 +481,16 @@ impl MinecraftInstance {
                 None,
                 {
                     let event_broadcaster = event_broadcaster.clone();
-                    let progression_event_id = progression_event_id;
                     &move |dl| {
                         if let Some(total) = dl.total {
-                            event_broadcaster.send(Event {
-                                event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                                    event_id: progression_event_id,
-                                    progression_event_inner:
-                                        ProgressionEventInner::ProgressionUpdate {
-                                            progress: (dl.step as f64 / total as f64) * 4.0,
-                                            progress_message: format!(
-                                                "2/4: Downloading JRE {}",
-                                                format_byte_download(dl.downloaded, total)
-                                            ),
-                                        },
-                                }),
-                                details: "".to_string(),
-                                snowflake: Snowflake::default(),
-                                caused_by: CausedBy::Unknown,
-                            });
+                            event_broadcaster.send(Event::new_progression_event_update(
+                                progression_event_id,
+                                format!(
+                                    "2/4: Downloading JRE {}",
+                                    format_byte_download(dl.downloaded, total)
+                                ),
+                                (dl.step as f64 / total as f64) * 4.0,
+                            ));
                         }
                     }
                 },
@@ -524,7 +498,7 @@ impl MinecraftInstance {
             )
             .await?;
 
-            let unzipped_content = unzip_file(
+            let unzipped_content = unzip_file_async(
                 &downloaded,
                 UnzipOption::ToDir(path_to_runtimes.join("java")),
             )
@@ -554,18 +528,11 @@ impl MinecraftInstance {
                 unzipped_content.iter().last().unwrap().display()
             ))?;
         } else {
-            event_broadcaster.send(Event {
-                event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                    event_id: progression_event_id,
-                    progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                        progress: 4.0,
-                        progress_message: "2/4: JRE already downloaded".to_string(),
-                    },
-                }),
-                details: "".to_string(),
-                snowflake: Snowflake::default(),
-                caused_by: CausedBy::Unknown,
-            });
+            event_broadcaster.send(Event::new_progression_event_update(
+                progression_event_id,
+                "2/4: JRE already downloaded",
+                4.0,
+            ));
         }
 
         // Step 3: Download server.jar
@@ -592,44 +559,29 @@ impl MinecraftInstance {
             Some(jar_name),
             {
                 let event_broadcaster = event_broadcaster.clone();
-                let progression_event_id = progression_event_id;
                 &move |dl| {
                     if let Some(total) = dl.total {
-                        event_broadcaster.send(Event {
-                            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                                event_id: progression_event_id,
-                                progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                                    progress: (dl.step as f64 / total as f64) * 3.0,
-                                    progress_message: format!(
-                                        "3/4: Downloading {} {} {}",
-                                        flavour_name,
-                                        jar_name,
-                                        format_byte_download(dl.downloaded, total),
-                                    ),
-                                },
-                            }),
-                            details: "".to_string(),
-                            snowflake: Snowflake::default(),
-                            caused_by: CausedBy::Unknown,
-                        });
+                        event_broadcaster.send(Event::new_progression_event_update(
+                            progression_event_id,
+                            format!(
+                                "3/4: Downloading {} {} {}",
+                                flavour_name,
+                                jar_name,
+                                format_byte_download(dl.downloaded, total),
+                            ),
+                            (dl.step as f64 / total as f64) * 3.0,
+                        ));
                     } else {
-                        event_broadcaster.send(Event {
-                            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                                event_id: progression_event_id,
-                                progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                                    progress: 0.0,
-                                    progress_message: format!(
-                                        "3/4: Downloading {} {} {}",
-                                        flavour_name,
-                                        jar_name,
-                                        format_byte(dl.downloaded),
-                                    ),
-                                },
-                            }),
-                            details: "".to_string(),
-                            snowflake: Snowflake::default(),
-                            caused_by: CausedBy::Unknown,
-                        });
+                        event_broadcaster.send(Event::new_progression_event_update(
+                            progression_event_id,
+                            format!(
+                                "3/4: Downloading {} {} {}",
+                                flavour_name,
+                                jar_name,
+                                format_byte(dl.downloaded),
+                            ),
+                            0.0,
+                        ));
                     }
                 }
             },
@@ -647,18 +599,11 @@ impl MinecraftInstance {
             .join("java");
         // Step 3 (part 2): Forge Setup
         if let Flavour::Forge { .. } = flavour.clone() {
-            event_broadcaster.send(Event {
-                event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                    event_id: progression_event_id,
-                    progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                        progress: 1.0,
-                        progress_message: "3/4: Installing Forge Server".to_string(),
-                    },
-                }),
-                details: "".to_string(),
-                snowflake: Snowflake::default(),
-                caused_by: CausedBy::Unknown,
-            });
+            event_broadcaster.send(Event::new_progression_event_update(
+                progression_event_id,
+                "3/4: Installing Forge Server",
+                1.0,
+            ));
 
             if !dont_spawn_terminal(
                 Command::new(&jre)
@@ -690,18 +635,11 @@ impl MinecraftInstance {
         }
 
         // Step 4: Finishing Up
-        event_broadcaster.send(Event {
-            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
-                event_id: progression_event_id,
-                progression_event_inner: ProgressionEventInner::ProgressionUpdate {
-                    progress: 1.0,
-                    progress_message: "4/4: Finishing up".to_string(),
-                },
-            }),
-            details: "".to_string(),
-            snowflake: Snowflake::default(),
-            caused_by: CausedBy::Unknown,
-        });
+        event_broadcaster.send(Event::new_progression_event_update(
+            progression_event_id,
+            "4/4: Finishing up",
+            1.0,
+        ));
 
         let restore_config = RestoreConfig {
             name: config.name,
@@ -768,90 +706,6 @@ impl MinecraftInstance {
             .await
             .expect("failed to write to server.properties");
         };
-        let state = Arc::new(Mutex::new(State::Stopped));
-        let (backup_tx, mut backup_rx): (
-            UnboundedSender<BackupInstruction>,
-            UnboundedReceiver<BackupInstruction>,
-        ) = tokio::sync::mpsc::unbounded_channel();
-        let _backup_task = tokio::spawn({
-            let backup_period = restore_config.backup_period;
-            let path_to_resources = path_to_resources.clone();
-            let path_to_instance = path_to_instance.clone();
-            let state = state.clone();
-            async move {
-                let backup_now = || async {
-                    debug!("Backing up instance");
-                    let backup_dir = &path_to_resources.join("worlds/backup");
-                    tokio::fs::create_dir_all(&backup_dir).await.ok();
-                    // get current time in human readable format
-                    let time = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S");
-                    let backup_name = format!("backup-{}", time);
-                    let backup_path = backup_dir.join(&backup_name);
-                    if let Err(e) = tokio::task::spawn_blocking({
-                        let path_to_instance = path_to_instance.clone();
-                        let backup_path = backup_path.clone();
-                        let mut copy_option = fs_extra::dir::CopyOptions::new();
-                        copy_option.copy_inside = true;
-                        move || {
-                            fs_extra::dir::copy(
-                                path_to_instance.join("world"),
-                                &backup_path,
-                                &copy_option,
-                            )
-                        }
-                    })
-                    .await
-                    {
-                        error!("Failed to backup instance: {}", e);
-                    }
-                };
-                let mut backup_period = backup_period;
-                let mut counter = 0;
-                loop {
-                    tokio::select! {
-                           instruction = backup_rx.recv() => {
-                             if instruction.is_none() {
-                                 info!("Backup task exiting");
-                                 break;
-                             }
-                             let instruction = instruction.unwrap();
-                             match instruction {
-                             BackupInstruction::SetPeriod(new_period) => {
-                                 backup_period = new_period;
-                             },
-                             BackupInstruction::BackupNow => backup_now().await,
-                             BackupInstruction::Pause => {
-                                     loop {
-                                         if let Some(BackupInstruction::Resume) = backup_rx.recv().await {
-                                             break;
-                                         } else {
-                                             continue
-                                         }
-                                     }
-
-                             },
-                             BackupInstruction::Resume => {
-                                 continue;
-                             },
-                             }
-                           }
-                           _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                             if let Some(period) = backup_period {
-                                 if *state.lock().await == State::Running {
-                                     debug!("counter is {}", counter);
-                                     counter += 1;
-                                     if counter >= period {
-                                         counter = 0;
-                                         backup_now().await;
-                                     }
-                                 }
-                             }
-                           }
-                    }
-                }
-            }
-        });
-
         let java_path = path_to_runtimes
             .join("java")
             .join(format!("jre{}", restore_config.jre_major_version))
@@ -890,7 +744,6 @@ impl MinecraftInstance {
             process: Arc::new(Mutex::new(None)),
             system: Arc::new(Mutex::new(sysinfo::System::new_all())),
             stdin: Arc::new(Mutex::new(None)),
-            backup_sender: backup_tx,
             rcon_conn: Arc::new(Mutex::new(None)),
             configurable_manifest,
             macro_name_to_last_run: Arc::new(Mutex::new(HashMap::new())),

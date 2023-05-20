@@ -3,7 +3,7 @@ name = "lodestone_core"
 description = "The backend for Lodestone"
 homepage = "https://github.com/Lodestone-Team"
 readme = "README.md"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 license = "APGL-3.0"
 exclude = ["target/*", "InstanceTest/*"]
@@ -44,7 +44,6 @@ headers = "0.3"
 home = "0.5.3"
 igd = "0.12.0"
 indexmap = { version = "1.0.2", features = ["serde-1"] }
-indicatif = "0.15.0"
 jsonwebtoken = "8.1.1"
 lazy_static = "1.4.0"
 local-ip-address = "0.5.0"
@@ -69,7 +68,6 @@ sqlx = { version = "0.6.2", git = "https://github.com/Lodestone-Team/sqlx", feat
 ] }
 sysinfo = "0.26.5"
 tempdir = "0.3.7"
-tempfile = "3.5.0"
 thiserror = "1.0.38"
 time = { version = "0.3.17", features = ["macros"] }
 tokio = { version = "1.21.1", features = ["full"] }
@@ -93,7 +91,7 @@ zip = "0.6.2"
 openssl = { version = "0.10.45", features = ["vendored"], optional = true }
 flate2 = "1.0.24"
 tar = "0.4.38"
-unrar = "0.4.4"
+tempfile = "3.5.0"
 [dependencies.uuid]
 version = "1.1.2"
 features = [
