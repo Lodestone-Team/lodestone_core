@@ -9,7 +9,7 @@ use scraper::{Html, Selector};
 use crate::error::Error;
 
 
-pub async fn read_properties_from_path(
+pub(super) async fn read_properties_from_path(
     path_to_properties: &Path,
 ) -> Result<IndexMap<String, String>, Error> {
     let properties_file = tokio::fs::File::open(path_to_properties)
@@ -47,7 +47,7 @@ pub async fn read_properties_from_path(
     Ok(ret)
 }
 
-pub async fn get_latest_zip_url() -> Result<String, Error> {
+pub(super) async fn get_latest_zip_url() -> Result<String, Error> {
     let html_doc = reqwest::get("https://www.minecraft.net/en-us/download/server/bedrock/")
         .await
         .map_err(|_| eyre!("Failed to fetch the bedrock server html"))?
