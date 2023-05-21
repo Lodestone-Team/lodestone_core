@@ -29,9 +29,9 @@ impl DependencyManager {
         return match file {
             Ok(file) => match serde_json::to_writer(file, &self.registered_paths) {
                 Ok(_) => Ok(()),
-                Err(e) => Err(SaveError::SerdeError(e))
+                Err(e) => Err(DependencyManagerError::SerdeError(e))
             },
-            Err(e) => Err(SaveError::IoError(e))
+            Err(e) => Err(DependencyManagerError::IoError(e))
         }
     }
 
@@ -50,10 +50,10 @@ impl DependencyManager {
             Err(error) => return match error.kind() {
                 ErrorKind::NotFound => match File::create(&self.file_path) {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(DependencyManagerError(e)),
+                    Err(e) => Err(DependencyManagerError::IoError(e)),
                 },
                 other_error => {
-                    Err(DependencyManagerError(io::Error::from(other_error)))
+                    Err(DependencyManagerError::IoError(io::Error::from(other_error)))
                 }
             }
         }
@@ -62,19 +62,22 @@ impl DependencyManager {
     pub fn register(&mut self, name: String, path: String) -> Result<(), DependencyManagerError> {
         self.load()?;
 
-        match &self.registered_paths {
-            Some(mut hashMap) => hashMap.insert(name, path),
-            None => ()
-        }
+        match self.registered_paths {
+            Some(ref mut hashMap) => hashMap.insert(name, path),
+            None => return Ok(())
+        };
         self.save()
     }
 
-    pub fn get(&mut self, name: String) -> Result<&String, E> {
+    pub fn get(&mut self, name: &String) -> Result<&str, DependencyManagerError> {
         self.load()?;
 
-        match self.registered_paths.get((&name).as_ref()) {
-            Some(path) => Ok(path),
-            None => Err(DependencyManagerError::NotFoundError),
+        match &self.registered_paths {
+            Some(hashMap) => match hashMap.get::<String>(name) {
+                Some(&ref path) => Ok(&*path),
+                None => Err(DependencyManagerError::NotFoundError),
+            },
+            None => panic!("No registered paths")
         }
     }
 }
