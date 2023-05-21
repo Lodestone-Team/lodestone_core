@@ -5,8 +5,6 @@ use std::fs::File;
 use std::io;
 use std::io::{ErrorKind};
 
-const STATE_FILE_PATH: &str = "./bin/dependencies.json";
-
 pub enum DependencyManagerError {
     IoError(io::Error),
     SerdeError(serde_json::Error),
@@ -15,17 +13,19 @@ pub enum DependencyManagerError {
 
 pub struct DependencyManager {
     registered_paths: Option<HashMap<String, String>>,
+    file_path: String,
 }
 
 impl DependencyManager {
-    fn new() -> DependencyManager {
+    fn new(file_path: &str) -> DependencyManager {
         DependencyManager {
             registered_paths: None,
+            file_path: String::from(file_path),
         }
     }
 
     fn save(&self) -> Result<(), DependencyManagerError> {
-        let file = File::create(STATE_FILE_PATH);
+        let file = File::create(&self.file_path);
         return match file {
             Ok(file) => match serde_json::to_writer(file, &self.registered_paths) {
                 Ok(_) => Ok(()),
@@ -40,7 +40,7 @@ impl DependencyManager {
             return Ok(())
         }
 
-        let file = File::open(STATE_FILE_PATH);
+        let file = File::open(&self.file_path);
         match file {
             Ok(file) => {
                 let dependencies: HashMap<String, String> = serde_json::from_reader(file).unwrap();
@@ -48,7 +48,7 @@ impl DependencyManager {
                 Ok(())
             }
             Err(error) => return match error.kind() {
-                ErrorKind::NotFound => match File::create(STATE_FILE_PATH) {
+                ErrorKind::NotFound => match File::create(&self.file_path) {
                     Ok(_) => Ok(()),
                     Err(e) => Err(DependencyManagerError(e)),
                 },
