@@ -10,8 +10,81 @@ use crate::{
     macro_executor::MacroPID,
     output_types::ClientEvent,
     traits::{t_macro::ExitStatus, t_player::Player, t_server::State, InstanceInfo},
-    types::{InstanceUuid, Snowflake},
+    types::{InstanceUuid, Snowflake, TimeRange},
 };
+
+pub trait EventFilter {
+    fn filter(&mut self, event: impl AsRef<ClientEvent>) -> bool;
+}
+
+#[derive(Deserialize, Clone, Debug, TS)]
+#[ts(export)]
+pub struct EventQuery {
+    pub event_levels: Option<Vec<EventLevel>>,
+    pub event_types: Option<Vec<EventType>>,
+    pub instance_event_types: Option<Vec<InstanceEventKind>>,
+    pub user_event_types: Option<Vec<UserEventKind>>,
+    pub event_user_ids: Option<Vec<UserId>>,
+    pub event_instance_ids: Option<Vec<InstanceUuid>>,
+    pub bearer_token: Option<String>,
+    pub time_range: Option<TimeRange>,
+}
+
+impl EventQuery {
+    pub fn filter(&self, event: impl AsRef<ClientEvent>) -> bool {
+        let event = event.as_ref();
+        if let Some(event_levels) = &self.event_levels {
+            if !event_levels.contains(&event.level) {
+                return false;
+            }
+        }
+        if let Some(event_types) = &self.event_types {
+            if !event_types.contains(&event.event_inner.as_ref().into()) {
+                return false;
+            }
+        }
+        if let Some(instance_event_types) = &self.instance_event_types {
+            if let EventInner::InstanceEvent(instance_event) = &event.event_inner {
+                if !instance_event_types
+                    .contains(&instance_event.instance_event_inner.as_ref().into())
+                {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        if let Some(user_event_types) = &self.user_event_types {
+            if let EventInner::UserEvent(user_event) = &event.event_inner {
+                if !user_event_types.contains(&user_event.user_event_inner.as_ref().into()) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        if let Some(event_user_ids) = &self.event_user_ids {
+            if let EventInner::UserEvent(user_event) = &event.event_inner {
+                if !event_user_ids.contains(&user_event.user_id) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        if let Some(event_instance_ids) = &self.event_instance_ids {
+            if let EventInner::InstanceEvent(instance_event) = &event.event_inner {
+                if !event_instance_ids.contains(&instance_event.instance_uuid) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        // TODO might need to check time too
+        true
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
@@ -22,8 +95,12 @@ pub enum InstanceEventInner {
     StateTransition {
         to: State,
     },
-    InstanceWarning,
-    InstanceError,
+    InstanceWarning {
+        message: String,
+    },
+    InstanceError {
+        message: String,
+    },
     InstanceInput {
         message: String,
     },
@@ -125,7 +202,14 @@ impl From<MacroEvent> for Event {
 #[serde(tag = "type")]
 pub enum ProgressionEndValue {
     InstanceCreation(InstanceInfo),
-    InstanceDelete { instance_uuid: InstanceUuid },
+    InstanceDelete {
+        instance_uuid: InstanceUuid,
+    },
+    FSOperationCompleted {
+        instance_uuid: InstanceUuid,
+        success: bool,
+        message: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
@@ -151,7 +235,6 @@ pub enum ProgressionStartValue {
 pub enum ProgressionEventInner {
     ProgressionStart {
         progression_name: String,
-        producer_id: Option<InstanceUuid>,
         total: Option<f64>,
         inner: Option<ProgressionStartValue>,
     },
@@ -200,11 +283,22 @@ pub fn new_fs_event(operation: FSOperation, target: FSTarget, caused_by: CausedB
     }
 }
 
+pub struct ProgressionEventID(Snowflake);
+
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
 #[ts(export)]
 pub struct ProgressionEvent {
-    pub event_id: Snowflake,
-    pub progression_event_inner: ProgressionEventInner,
+    event_id: Snowflake,
+    progression_event_inner: ProgressionEventInner,
+}
+
+impl ProgressionEvent {
+    pub fn event_id(&self) -> Snowflake {
+        self.event_id
+    }
+    pub fn progression_event_inner(&self) -> &ProgressionEventInner {
+        &self.progression_event_inner
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS, PartialEq)]
@@ -393,7 +487,7 @@ impl Event {
     pub fn new_instance_state_transition(
         instance_uuid: InstanceUuid,
         instance_name: String,
-        state: State,
+        new_state: State,
     ) -> Event {
         Event {
             details: "".to_string(),
@@ -401,7 +495,72 @@ impl Event {
             event_inner: EventInner::InstanceEvent(InstanceEvent {
                 instance_uuid,
                 instance_name,
-                instance_event_inner: InstanceEventInner::StateTransition { to: state },
+                instance_event_inner: InstanceEventInner::StateTransition { to: new_state },
+            }),
+            caused_by: CausedBy::System,
+        }
+    }
+    #[must_use]
+    pub fn new_progression_event_start(
+        progression_name: impl AsRef<str>,
+        total: Option<f64>,
+        inner: Option<ProgressionStartValue>,
+        caused_by: CausedBy,
+    ) -> (Event, ProgressionEventID) {
+        let event_id = ProgressionEventID(Snowflake::default());
+        (
+            Event {
+                details: "".to_string(),
+                snowflake: Snowflake::default(),
+                event_inner: EventInner::ProgressionEvent(ProgressionEvent {
+                    event_id: event_id.0,
+                    progression_event_inner: ProgressionEventInner::ProgressionStart {
+                        progression_name: progression_name.as_ref().to_string(),
+                        total,
+                        inner,
+                    },
+                }),
+                caused_by,
+            },
+            event_id,
+        )
+    }
+
+    pub fn new_progression_event_update(
+        event_id: &ProgressionEventID,
+        progress_message: impl AsRef<str>,
+        progress: f64,
+    ) -> Event {
+        Event {
+            details: "".to_string(),
+            snowflake: Snowflake::default(),
+            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
+                event_id: event_id.0,
+                progression_event_inner: ProgressionEventInner::ProgressionUpdate {
+                    progress_message: progress_message.as_ref().to_string(),
+                    progress,
+                },
+            }),
+            caused_by: CausedBy::System,
+        }
+    }
+
+    pub fn new_progression_event_end(
+        event_id: ProgressionEventID,
+        success: bool,
+        message: Option<impl AsRef<str>>,
+        inner: Option<ProgressionEndValue>,
+    ) -> Event {
+        Event {
+            details: "".to_string(),
+            snowflake: Snowflake::default(),
+            event_inner: EventInner::ProgressionEvent(ProgressionEvent {
+                event_id: event_id.0,
+                progression_event_inner: ProgressionEventInner::ProgressionEnd {
+                    success,
+                    message: message.map(|s| s.as_ref().to_string()),
+                    inner,
+                },
             }),
             caused_by: CausedBy::System,
         }

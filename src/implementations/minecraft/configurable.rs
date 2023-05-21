@@ -3,9 +3,9 @@ use std::sync::atomic;
 
 use async_trait::async_trait;
 use color_eyre::eyre::{eyre, Context, ContextCompat};
-use tempdir::TempDir;
 
 use crate::error::{Error, ErrorKind};
+use crate::prelude::PATH_TO_TMP;
 use crate::traits::t_configurable::manifest::{
     ConfigurableManifest, ConfigurableValue, ConfigurableValueType, SettingManifest,
 };
@@ -35,7 +35,7 @@ impl TConfigurable for MinecraftInstance {
     async fn version(&self) -> String {
         self.config.lock().await.version.clone()
     }
-    
+
     async fn description(&self) -> String {
         self.config.lock().await.description.clone()
     }
@@ -156,8 +156,8 @@ impl TConfigurable for MinecraftInstance {
                 })
             }
         };
-        let temp_dir = TempDir::new("lodestone")
-            .context("Cannot create temporary directory to download the server jar file")?;
+        let lodestone_tmp = PATH_TO_TMP.with(|p| p.clone());
+        let temp_dir = tempfile::tempdir_in(lodestone_tmp).context("Failed to create temp dir")?;
         download_file(
             &url,
             temp_dir.path(),
@@ -167,14 +167,17 @@ impl TConfigurable for MinecraftInstance {
         )
         .await?;
         let jar_path = temp_dir.path().join("server.jar");
-        tokio::fs::rename(jar_path, self.path().await.join("server.jar"))
-            .await
-            .context("Cannot move the downloaded server jar file to the server directory")?;
+        crate::util::fs::rename(jar_path, self.path().await.join("server.jar")).await?;
         self.config.lock().await.version = version;
         self.write_config_to_file().await
     }
 
-    async fn configurable_manifest(&self) -> ConfigurableManifest {
+    async fn configurable_manifest(&mut self) -> ConfigurableManifest {
+        self.configurable_manifest
+            .lock()
+            .await
+            .clear_section(ServerPropertySetting::get_section_id());
+        let _ = self.read_properties().await;
         self.configurable_manifest.lock().await.clone()
     }
 
@@ -184,6 +187,7 @@ impl TConfigurable for MinecraftInstance {
         setting_id: &str,
         value: ConfigurableValue,
     ) -> Result<(), Error> {
+        let _ = self.read_properties().await;
         self.configurable_manifest
             .lock()
             .await
