@@ -33,11 +33,15 @@ pub async fn start_instance(
         user_id: requester.uid.clone(),
         user_name: requester.username.clone(),
     };
-    let mut instance_list = state.instances.lock().await;
-    let instance = instance_list.get_mut(&uuid).ok_or_else(|| Error {
-        kind: ErrorKind::NotFound,
-        source: eyre!("Instance not found"),
-    })?;
+    let mut instance = state
+        .instances
+        .get_mut(&uuid)
+        .ok_or_else(|| Error {
+            kind: ErrorKind::NotFound,
+            source: eyre!("Instance not found"),
+        })?
+        .value()
+        .clone();
     let port = instance.port().await;
 
     if state.port_manager.lock().await.port_status(port).is_in_use {
@@ -64,8 +68,6 @@ pub async fn stop_instance(
     };
     state
         .instances
-        .lock()
-        .await
         .get_mut(&uuid)
         .ok_or_else(|| Error {
             kind: ErrorKind::NotFound,
@@ -89,8 +91,7 @@ pub async fn restart_instance(
         user_id: requester.uid.clone(),
         user_name: requester.username.clone(),
     };
-    let mut instance_list = state.instances.lock().await;
-    let instance = instance_list.get_mut(&uuid).ok_or_else(|| Error {
+    let mut instance = state.instances.get_mut(&uuid).ok_or_else(|| Error {
         kind: ErrorKind::NotFound,
         source: eyre!("Instance not found"),
     })?;
@@ -112,8 +113,6 @@ pub async fn kill_instance(
     };
     state
         .instances
-        .lock()
-        .await
         .get_mut(&uuid)
         .ok_or_else(|| Error {
             kind: ErrorKind::NotFound,
@@ -138,8 +137,6 @@ pub async fn send_command(
     };
     state
         .instances
-        .lock()
-        .await
         .get_mut(&uuid)
         .ok_or_else(|| Error {
             kind: ErrorKind::NotFound,
@@ -165,8 +162,6 @@ pub async fn get_instance_state(
     Ok(Json(json!(
         state
             .instances
-            .lock()
-            .await
             .get(&uuid)
             .ok_or_else(|| Error {
                 kind: ErrorKind::NotFound,

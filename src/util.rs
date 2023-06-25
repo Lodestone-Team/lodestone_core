@@ -23,7 +23,7 @@ pub struct Authentication {
 }
 
 use crate::error::Error;
-use crate::prelude::{LODESTONE_PATH, PATH_TO_TMP};
+use crate::prelude::path_to_tmp;
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SetupProgress {
@@ -45,7 +45,7 @@ pub async fn download_file(
     on_download: &(dyn Fn(DownloadProgress) + Send + Sync),
     overwrite_old: bool,
 ) -> Result<PathBuf, Error> {
-    let lodestone_tmp = PATH_TO_TMP.with(|p| p.clone());
+    let lodestone_tmp = path_to_tmp().clone();
     tokio::fs::create_dir_all(&lodestone_tmp)
         .await
         .context("Failed to create tmp dir")?;
@@ -229,7 +229,7 @@ pub fn unzip_file(
         UnzipOption::ToDirectoryWithFileName => resolve_path_conflict(parent.join(file_stem), None),
         UnzipOption::ToDir(ref d) => d.to_owned(),
     };
-    let lodestone_tmp = LODESTONE_PATH.with(|v| v.join("tmp"));
+    let lodestone_tmp = path_to_tmp().clone();
     std::fs::create_dir_all(&lodestone_tmp).context(format!(
         "Failed to create temporary directory {}",
         lodestone_tmp.display()
@@ -316,7 +316,7 @@ pub fn zip_files(files: &[impl AsRef<Path>], dest: impl AsRef<Path>) -> Result<P
     let dest = dest.as_ref();
     std::fs::create_dir_all(dest.parent().context("Failed to get destination parent")?)
         .context(format!("Failed to create directory {}", dest.display()))?;
-    let lodestone_tmp = LODESTONE_PATH.with(|v| v.join("tmp"));
+    let lodestone_tmp = path_to_tmp().clone();
     std::fs::create_dir_all(&lodestone_tmp).context(format!(
         "Failed to create temporary directory {}",
         lodestone_tmp.display()
@@ -629,6 +629,7 @@ pub fn format_byte(mut bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::prelude::init_paths;
     use crate::util::{resolve_path_conflict, unzip_file, zip_files, UnzipOption};
     use std::collections::HashSet;
     use std::io::Read;
@@ -637,6 +638,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_unzip_file() {
+        let temp_lodestone_path = tempfile::tempdir().unwrap();
+        let temp_lodestone_path = temp_lodestone_path.path();
+        init_paths(temp_lodestone_path.to_path_buf());
         let temp = tempdir::TempDir::new("test_unzip_file").unwrap();
         let temp_path = temp.path();
         let zip = PathBuf::from("testdata/sample.zip");
@@ -664,6 +668,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_unzip_file_3() {
+        let temp_lodestone_path = tempfile::tempdir().unwrap();
+        let temp_lodestone_path = temp_lodestone_path.path();
+        init_paths(temp_lodestone_path.to_path_buf());
         let temp = tempdir::TempDir::new("test_unzip_file").unwrap();
         let dest_path = temp.path().to_path_buf();
         let tar_gz = PathBuf::from("testdata/sample.gz");
@@ -693,6 +700,9 @@ mod tests {
 
     #[test]
     fn test_resolve_path_conflict() {
+        let temp_lodestone_path = tempfile::tempdir().unwrap();
+        let temp_lodestone_path = temp_lodestone_path.path();
+        init_paths(temp_lodestone_path.to_path_buf());
         let temp = tempdir::TempDir::new("test_unzip_file").unwrap();
         let temp_path = temp.path();
         let txt_path = temp_path.join("test.txt");

@@ -71,7 +71,7 @@
 
 ## Getting Started (end user)
 
-Follow the instruction on our [Github page](https://github.com/Lodestone-Team#installation)
+You should not download Lodestone Core directly due to its lack of ability to self-update. Please use [Lodestone CLI](https://github.com/Lodestone-Team/lodestone_cli) instead.
 
 ### Using Docker Image
 
@@ -83,14 +83,40 @@ Alternatively, you may build your own image using the default `Dockerfile`, not 
 > You may add additional ports as you wish to forward, but 16662 is the default port served in the image.
 > You may add a volume for your lodestone instance to be accessible, in the example below, you can create a volume first by using `docker volume create lodestone`.
 
-To use:
+Docker CLI example:
 ```sh
 docker run -d \
   --name lodestone \
   --restart unless-stopped \
   -p 16662:16662 \
-  -v lodestone:/root/.lodestone \
-  ghcr.io/Lodestone-Team/lodestone_core
+  -v lodestone:/home/user/.lodestone \
+  ghcr.io/lodestone-team/lodestone_core
+```
+Docker Compose example:
+
+Download the docker-compose.yml file from this repo using
+```sh
+wget https://raw.githubusercontent.com/Lodestone-Team/lodestone_core/main/docker-compose.yml
+```
+and then run it using
+```sh
+docker compose up -d
+```
+Alternatively, create docker-compose.yml yourself:
+```yml
+version: '3.8'
+services:
+  lodestone:
+    container_name: lodestone
+    image: ghcr.io/lodestone-team/lodestone_core
+    restart: unless-stopped
+    ports:
+      - "16662:16662"
+    volumes:
+      - lodestone:/home/user/.lodestone
+
+volumes:
+  lodestone:
 ```
 
 <!-- GETTING STARTED -->
@@ -216,8 +242,8 @@ Active members of the Lodestone client team:
 [stars-url]: https://github.com/github_username/repo_name/stargazers -->
 [issues-shield]: https://img.shields.io/github/issues/Lodestone-Team/client?style=for-the-badge
 [issues-url]: https://github.com/Lodestone-Team/client/issues
-[workflow-shield]: https://img.shields.io/github/actions/workflow/status/Lodestone-Team/client/client.yml?style=for-the-badge
-[workflow-url]: https://github.com/Lodestone-Team/client/actions
+[workflow-shield]: https://img.shields.io/github/actions/workflow/status/Lodestone-Team/client/push.yml?style=for-the-badge
+[workflow-url]: https://github.com/Lodestone-Team/lodestone_core/actions
 [license-shield]: https://img.shields.io/github/license/github_username/repo_name.svg?style=for-the-badge
 [license-url]: https://github.com/github_username/repo_name/blob/master/LICENSE.txt
 [product-screenshot]: images/screenshot.png

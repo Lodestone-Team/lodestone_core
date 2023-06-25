@@ -15,7 +15,7 @@ use crate::implementations::minecraft::line_parser::{
 };
 use crate::implementations::minecraft::player::MinecraftPlayer;
 use crate::implementations::minecraft::util::name_to_uuid;
-use crate::macro_executor::SpawnResult;
+use crate::macro_executor::{DefaultWorkerOptionGenerator, SpawnResult};
 use crate::traits::t_configurable::TConfigurable;
 use crate::traits::t_macro::TaskEntry;
 use crate::traits::t_server::{MonitorReport, State, StateAction, TServer};
@@ -23,7 +23,7 @@ use crate::traits::t_server::{MonitorReport, State, StateAction, TServer};
 use crate::types::Snowflake;
 use crate::util::{dont_spawn_terminal, list_dir};
 
-use super::r#macro::{resolve_macro_invocation, MinecraftMainWorkerGenerator};
+use super::r#macro::resolve_macro_invocation;
 use super::{Flavour, ForgeBuildVersion, MinecraftInstance};
 use tracing::{error, info, warn};
 
@@ -56,38 +56,22 @@ impl TServer for MinecraftInstance {
 
         let prelaunch = resolve_macro_invocation(&self.path_to_instance, "prelaunch");
         if let Some(prelaunch) = prelaunch {
-            // read prelaunch script
-            let content = std::fs::read_to_string(&prelaunch)
-                .map_err(|e| {
-                    error!("Failed to read prelaunch script: {}", e);
-                    e
-                })
-                .unwrap_or_default();
-
-            let is_long_running = content.contains("LODESTONE_LONG_RUNNING_MACRO");
-
-            let main_worker_generator = MinecraftMainWorkerGenerator::new(self.clone());
-            let res = self
+            let res: Result<SpawnResult, Error> = self
                 .macro_executor
                 .spawn(
                     prelaunch,
                     Vec::new(),
                     CausedBy::System,
-                    Box::new(main_worker_generator),
+                    Box::new(DefaultWorkerOptionGenerator),
                     None,
                     Some(self.uuid.clone()),
-                    if is_long_running {
-                        None
-                    } else {
-                        Some(Duration::from_secs(5))
-                    },
                 )
                 .await;
 
             if let Ok(SpawnResult {
                 macro_pid: pid,
                 exit_future,
-                ..
+                detach_future,
             }) = res
             {
                 self.pid_to_task_entry.lock().await.insert(
@@ -98,24 +82,13 @@ impl TServer for MinecraftInstance {
                         creation_time: chrono::Utc::now().timestamp(),
                     },
                 );
-                if !is_long_running {
-                    info!(
-                        "[{}] Waiting for prelaunch script to finish (5 seconds timeout)",
-                        config.name.clone()
-                    );
-                    if exit_future.await.is_err() {
-                        // kill the prelaunch script
-                        info!(
-                            "[{}] prelaunch script timed out, killing it",
-                            config.name.clone()
-                        );
-                        let _ = self.macro_executor.abort_macro(pid);
+                tokio::select! {
+                    _ = exit_future => {
+                        info!("Prelaunch script exited");
                     }
-                } else {
-                    info!(
-                        "[{}] Long running prelaunch script detected, skipping wait",
-                        config.name.clone()
-                    );
+                    _ = detach_future => {
+                        info!("Prelaunch script requested detach");
+                    }
                 }
             }
         } else {
@@ -487,6 +460,7 @@ impl TServer for MinecraftInstance {
                             )
                             .unwrap();
                         self.players_manager.lock().await.clear(name);
+                        self.rcon_conn.lock().await.take();
                     }
                 });
                 self.config.lock().await.has_started = true;
@@ -631,24 +605,30 @@ impl TServer for MinecraftInstance {
             warn!("[{}] Instance is already stopped", config.name.clone());
             return Err(eyre!("Instance is already stopped").into());
         }
-        self.process
-            .lock()
-            .await
-            .as_mut()
-            .ok_or_else(|| {
-                error!(
-                    "[{}] Failed to kill instance: process not available",
-                    config.name.clone()
-                );
-                eyre!("Failed to kill instance: process not available")
-            })?
-            .kill()
-            .await
-            .context("Failed to kill process")
-            .map_err(|e| {
-                error!("[{}] Failed to kill instance: {}", config.name.clone(), e);
-                e
-            })?;
+        if let Some(process) = self.process.lock().await.as_mut() {
+            process
+                .kill()
+                .await
+                .context("Failed to kill process")
+                .map_err(|e| {
+                    error!("[{}] Failed to kill instance: {}", config.name.clone(), e);
+                    e
+                })?;
+        }
+        {
+            error!(
+                "[{}] Process not available, assuming instance is stopped",
+                config.name.clone()
+            );
+            *self.state.lock().await = State::Stopped;
+            self.event_broadcaster
+                .send(Event::new_instance_state_transition(
+                    self.uuid.clone(),
+                    config.name.clone(),
+                    State::Stopped,
+                ));
+            Err(eyre!("Process not available, assuming instance is stopped"))?;
+        }
         Ok(())
     }
 

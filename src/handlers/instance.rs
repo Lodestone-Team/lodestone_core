@@ -14,10 +14,8 @@ use crate::events::{CausedBy, Event, ProgressionEndValue, ProgressionStartValue}
 use crate::implementations::generic;
 use crate::traits::t_configurable::GameType;
 
-use minecraft::FlavourKind;
-
 use crate::implementations::minecraft::MinecraftInstance;
-use crate::prelude::{GameInstance, PATH_TO_INSTANCES};
+use crate::prelude::{path_to_instances, GameInstance};
 use crate::traits::t_configurable::manifest::SetupValue;
 use crate::traits::{t_configurable::TConfigurable, t_server::TServer, InstanceInfo, TInstance};
 
@@ -33,8 +31,7 @@ pub async fn get_instance_list(
     let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
     let mut list_of_configs: Vec<InstanceInfo> = Vec::new();
 
-    let instances = state.instances.lock().await;
-    for instance in instances.values() {
+    for instance in state.instances.iter() {
         if requester.can_perform_action(&UserAction::ViewInstance(instance.uuid().await)) {
             list_of_configs.push(instance.get_instance_info().await);
         }
@@ -52,9 +49,7 @@ pub async fn get_instance_info(
 ) -> Result<Json<InstanceInfo>, Error> {
     let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
 
-    let instances = state.instances.lock().await;
-
-    let instance = instances.get(&uuid).ok_or_else(|| Error {
+    let instance = state.instances.get(&uuid).ok_or_else(|| Error {
         kind: ErrorKind::NotFound,
         source: eyre!("Instance not found"),
     })?;
@@ -75,8 +70,8 @@ pub async fn create_minecraft_instance(
 
     let mut instance_uuid = InstanceUuid::default();
 
-    for uuid in state.instances.lock().await.keys() {
-        if let Some(uuid) = uuid.as_ref().get(0..8) {
+    for entry in state.instances.iter() {
+        if let Some(uuid) = entry.key().as_ref().get(0..8) {
             if uuid == &instance_uuid.no_prefix()[0..8] {
                 instance_uuid = InstanceUuid::default();
             }
@@ -85,22 +80,15 @@ pub async fn create_minecraft_instance(
 
     let instance_uuid = instance_uuid;
 
-    let flavour = match game_type {
-        HandlerGameType::MinecraftJavaVanilla => FlavourKind::Vanilla,
-        HandlerGameType::MinecraftForge => FlavourKind::Forge,
-        HandlerGameType::MinecraftFabric => FlavourKind::Fabric,
-        HandlerGameType::MinecraftPaper => FlavourKind::Paper,
-    };
+    let flavour = game_type.try_into()?;
 
     let setup_config = MinecraftInstance::construct_setup_config(manifest_value, flavour).await?;
 
-    let setup_path = PATH_TO_INSTANCES.with(|path| {
-        path.join(format!(
-            "{}-{}",
-            setup_config.name,
-            &instance_uuid.no_prefix()[0..8]
-        ))
-    });
+    let setup_path = path_to_instances().join(format!(
+        "{}-{}",
+        setup_config.name,
+        &instance_uuid.no_prefix()[0..8]
+    ));
 
     tokio::fs::create_dir_all(&setup_path)
         .await
@@ -196,8 +184,6 @@ pub async fn create_minecraft_instance(
                 });
             state
                 .instances
-                .lock()
-                .await
                 .insert(uuid.clone(), minecraft_instance.into());
         }
     });
@@ -218,8 +204,8 @@ pub async fn create_generic_instance(
     let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
     requester.try_action(&UserAction::CreateInstance)?;
     let mut instance_uuid = InstanceUuid::default();
-    for uuid in state.instances.lock().await.keys() {
-        if let Some(uuid) = uuid.as_ref().get(0..8) {
+    for entry in state.instances.iter() {
+        if let Some(uuid) = entry.key().as_ref().get(0..8) {
             if uuid == &instance_uuid.no_prefix()[0..8] {
                 instance_uuid = InstanceUuid::default();
             }
@@ -228,13 +214,11 @@ pub async fn create_generic_instance(
 
     let instance_uuid = instance_uuid;
 
-    let setup_path = PATH_TO_INSTANCES.with(|path| {
-        path.join(format!(
-            "{}-{}",
-            "generic",
-            &instance_uuid.no_prefix()[0..8]
-        ))
-    });
+    let setup_path = path_to_instances().join(format!(
+        "{}-{}",
+        setup_config.setup_value.name,
+        &instance_uuid.no_prefix()[0..8]
+    ));
 
     tokio::fs::create_dir_all(&setup_path)
         .await
@@ -263,8 +247,6 @@ pub async fn create_generic_instance(
 
     state
         .instances
-        .lock()
-        .await
         .insert(instance_uuid.clone(), instance.into());
     Ok(Json(()))
 }
@@ -276,14 +258,13 @@ pub async fn delete_instance(
 ) -> Result<Json<()>, Error> {
     let requester = state.users_manager.read().await.try_auth_or_err(&token)?;
     requester.try_action(&UserAction::DeleteInstance)?;
-    let mut instances = state.instances.lock().await;
     let caused_by = CausedBy::User {
         user_id: requester.uid.clone(),
         user_name: requester.username.clone(),
     };
-    if let Some(instance) = instances.remove(&uuid) {
+    if let Some((_, instance)) = state.instances.remove(&uuid) {
         if !(instance.state().await == State::Stopped) {
-            instances.insert(uuid.clone(), instance);
+            state.instances.insert(uuid.clone(), instance);
             Err(Error {
                 kind: ErrorKind::BadRequest,
                 source: eyre!("Instance must be stopped before deletion"),
@@ -306,7 +287,7 @@ pub async fn delete_instance(
                     Some("Failed to delete .lodestone_config. Instance not deleted"),
                     None,
                 ));
-                instances.insert(uuid.clone(), instance);
+                state.instances.insert(uuid.clone(), instance);
                 return Err::<Json<()>, std::io::Error>(e)
                     .context("Failed to delete .lodestone_config file. Instance not deleted")
                     .map_err(Into::into);
@@ -322,7 +303,6 @@ pub async fn delete_instance(
             if let GameInstance::GenericInstance(i) = instance {
                 i.destruct().await;
             };
-            drop(instances);
             let res = crate::util::fs::remove_dir_all(instance_path).await;
             match &res {
                 Ok(_) => event_broadcaster.send(Event::new_progression_event_end(
