@@ -1,14 +1,12 @@
-use serde_json;
-
 use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::io::{ErrorKind};
 
 pub enum DependencyManagerError {
-    IoError(io::Error),
-    SerdeError(serde_json::Error),
-    NotFoundError,
+    Io(io::Error),
+    Serde(serde_json::Error),
+    NotFound,
 }
 
 pub struct DependencyManager {
@@ -26,17 +24,17 @@ impl DependencyManager {
 
     fn save(&self) -> Result<(), DependencyManagerError> {
         let file = File::create(&self.file_path);
-        return match file {
+        match file {
             Ok(file) => match serde_json::to_writer(file, &self.registered_paths) {
                 Ok(_) => Ok(()),
-                Err(e) => Err(DependencyManagerError::SerdeError(e))
+                Err(e) => Err(DependencyManagerError::Serde(e))
             },
-            Err(e) => Err(DependencyManagerError::IoError(e))
+            Err(e) => Err(DependencyManagerError::Io(e))
         }
     }
 
     fn load(&mut self) -> Result<(), DependencyManagerError> {
-        if let Some(_) = self.registered_paths {
+        if self.registered_paths.is_some() {
             return Ok(())
         }
 
@@ -47,13 +45,13 @@ impl DependencyManager {
                 self.registered_paths = Option::from(dependencies);
                 Ok(())
             }
-            Err(error) => return match error.kind() {
+            Err(error) => match error.kind() {
                 ErrorKind::NotFound => match File::create(&self.file_path) {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(DependencyManagerError::IoError(e)),
+                    Err(e) => Err(DependencyManagerError::Io(e)),
                 },
                 other_error => {
-                    Err(DependencyManagerError::IoError(io::Error::from(other_error)))
+                    Err(DependencyManagerError::Io(io::Error::from(other_error)))
                 }
             }
         }
@@ -63,7 +61,7 @@ impl DependencyManager {
         self.load()?;
 
         match self.registered_paths {
-            Some(ref mut hashMap) => hashMap.insert(name, path),
+            Some(ref mut hash_map) => hash_map.insert(name, path),
             None => return Ok(())
         };
         self.save()
@@ -73,9 +71,9 @@ impl DependencyManager {
         self.load()?;
 
         match &self.registered_paths {
-            Some(hashMap) => match hashMap.get::<String>(name) {
-                Some(&ref path) => Ok(&*path),
-                None => Err(DependencyManagerError::NotFoundError),
+            Some(hash_map) => match hash_map.get::<String>(name) {
+                Some(path) => Ok(path),
+                None => Err(DependencyManagerError::NotFound),
             },
             None => panic!("No registered paths")
         }
