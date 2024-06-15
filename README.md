@@ -57,7 +57,11 @@
 <!-- ABOUT THE PROJECT -->
 
 
+### !!Repo Deprecated!!
 
+This repo is functionally deprecated in favour of the new mono repo: https://github.com/Lodestone-Team/lodestone
+
+However, due to Lodestone CLI still pointing to this repo to fetch the latest releases, this repo is not archived.
 
 
 ### Built With
