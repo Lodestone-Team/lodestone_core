@@ -1,41 +1,40 @@
-FROM rust as build
-
-# create and enter app directory
+### Pre-Configure the image for re-use.
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR /app
 
-# copy over project files
-COPY . ./
+### Stage 1.
+# Compute the receipe for the dependencies.
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-# build app using 'release' profile
-RUN cargo build --release --features "vendored-openssl"
+### Stage 2.
+# Build dem binaries.
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json 
 
-FROM debian:bullseye-slim as production
+COPY . .
+RUN cargo build --release --bin main --features "vendored-openssl" --locked
 
-#
+### Stage 3.
+# Doing the last things to setup the lodestone server.
+FROM debian:bullseye-slim AS runtime
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ARG UID=2000
+ARG USER=lodestone
+
 RUN apt-get update \
   && apt-get install -y ca-certificates \
   && update-ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# create and enter app directory
-WORKDIR /app
+RUN useradd -ms /bin/bash $USER && usermod -u $UID $USER
+USER $USER
 
-# copy over built app
-COPY --from=build /app/target/release/main ./
+RUN mkdir -p /home/$USER/.lodestone
+COPY --from=builder /app/target/release/main /usr/local/bin
 
-# specify default port
 EXPOSE 16662
-
-RUN groupadd user && useradd -g user user
-
-RUN mkdir -p /home/user/.lodestone
-RUN chown user /app
-RUN chown user /home/user/.lodestone
-
-USER user
-
-# specify persistent volume
-VOLUME ["/home/user/.lodestone"]
-
-# start lodestone_core
-CMD ["./main"]
+CMD ["/usr/local/bin/main"]
